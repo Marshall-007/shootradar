@@ -1,0 +1,116 @@
+[
+ {
+  "run_key": "research-2026-11-11",
+  "ran_at": "2026-11-11T08:00:00+02:00",
+  "added": 28,
+  "updated": 0,
+  "removed": 0,
+  "sources": [
+   {
+    "name": "Time Out Durban",
+    "kind": "research",
+    "status": "ok",
+    "found": 5,
+    "note": ""
+   },
+   {
+    "name": "Time Out",
+    "kind": "research",
+    "status": "ok",
+    "found": 4,
+    "note": ""
+   },
+   {
+    "name": "Bizcommunity",
+    "kind": "research",
+    "status": "ok",
+    "found": 3,
+    "note": ""
+   },
+   {
+    "name": "Gauteng Tourism",
+    "kind": "research",
+    "status": "ok",
+    "found": 2,
+    "note": ""
+   },
+   {
+    "name": "Big Concerts",
+    "kind": "research",
+    "status": "ok",
+    "found": 2,
+    "note": ""
+   },
+   {
+    "name": "What's On in Joburg",
+    "kind": "research",
+    "status": "ok",
+    "found": 2,
+    "note": ""
+   },
+   {
+    "name": "NGC tickets",
+    "kind": "research",
+    "status": "ok",
+    "found": 2,
+    "note": ""
+   },
+   {
+    "name": "CantonFair.net (third-party listing)",
+    "kind": "research",
+    "status": "ok",
+    "found": 1,
+    "note": ""
+   },
+   {
+    "name": "RugbyPass fixture",
+    "kind": "research",
+    "status": "ok",
+    "found": 1,
+    "note": ""
+   },
+   {
+    "name": "Nedbank Golf Challenge",
+    "kind": "research",
+    "status": "ok",
+    "found": 1,
+    "note": ""
+   },
+   {
+    "name": "IT News Africa",
+    "kind": "research",
+    "status": "ok",
+    "found": 1,
+    "note": ""
+   },
+   {
+    "name": "Briefly News",
+    "kind": "research",
+    "status": "ok",
+    "found": 1,
+    "note": ""
+   },
+   {
+    "name": "SA Rugby",
+    "kind": "research",
+    "status": "ok",
+    "found": 1,
+    "note": ""
+   },
+   {
+    "name": "Wits graduation dates",
+    "kind": "research",
+    "status": "ok",
+    "found": 1,
+    "note": ""
+   },
+   {
+    "name": "UP graduations",
+    "kind": "research",
+    "status": "ok",
+    "found": 1,
+    "note": ""
+   }
+  ]
+ }
+]

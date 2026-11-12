@@ -58,8 +58,9 @@
         return sb.from('profiles').upsert(row).select().single().then(function (r) { return ok(r, 'Could not save your profile.'); });
       },
       listEvents: function () {
-        return sb.from('events').select('*').order('starts_at').limit(1000).then(function (r) { return ok(r, 'Could not load events.'); });
+        return sb.from('events').select('*').gte('ends_at', new Date(Date.now() - 3 * 864e5).toISOString()).order('starts_at').limit(1500).then(function (r) { return ok(r, 'Could not load events.'); });
       },
+      listRuns: function () { return sb.from('refresh_runs').select('*').order('ran_at', { ascending: false }).limit(12).then(function (r) { return ok(r, 'Could not load the refresh log.'); }); },
       addEvent: function (ev) {
         var row = Object.assign({}, ev, { created_by: user ? user.id : null, status: user ? 'user' : 'submitted' });
         // Visitors who are not signed in cannot read back their own row, so do not ask for it.
@@ -171,6 +172,7 @@
       getProfile: function () { return later(db.profiles[need()] || null); },
       saveProfile: function (p) { db.profiles[need()] = Object.assign({ id: user.id }, p); return later(db.profiles[user.id]); },
       listEvents: function () { return later(function () { return db.events.slice().sort(function (a, b) { return new Date(a.starts_at) - new Date(b.starts_at); }); }); },
+      listRuns: function () { return later((window.SR_DEMO_RUNS || []).slice().reverse()); },
       addEvent: function (ev) { var row = Object.assign({ id: 'u-' + code(8).toLowerCase(), created_at: new Date().toISOString() }, ev, { created_by: user ? user.id : null, status: user ? 'user' : 'submitted' }); db.events.push(row); return later(user ? row : null); },
       deleteEvent: function (eid) { db.events = db.events.filter(function (e) { return e.id !== eid; }); return later(); },
       listGalleries: function () {

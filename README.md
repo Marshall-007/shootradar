@@ -48,7 +48,17 @@ Open the site in Chrome on Android, then choose **Install app** (in Chrome's men
 | Inactivity | Project pauses after 7 days with no activity | Open the app weekly, or restore the project from the Supabase dashboard. |
 | Cloudflare Pages | 500 deploys a month, unlimited traffic | No practical limit for the pilot. |
 
-## Updating the events
+## How events are refreshed
+
+- **Every day (about 05:10 SAST):** the GitHub workflow `Refresh events` runs `tools/refresh.py`. It applies `supabase/schema.sql` and `supabase/seed.sql`, pulls Ticketmaster South Africa and Quicket, adds new events, updates changed ones, removes feed events that have gone, and writes a row to the refresh log.
+- **Every week:** a scheduled Claude task researches listings that have no feed, updates `tools/events.json` and `tools/research_log.json`, rebuilds the seed and pushes. The push triggers the same workflow.
+- **In the app:** the footer shows the last refresh, and the Data sources page lists every source and the last runs.
+
+GitHub secrets used (repository Settings > Secrets and variables > Actions): `SUPABASE_DB_URL` (session pooler connection string, required), `TICKETMASTER_API_KEY`, `QUICKET_API_KEY`. A feed without a key is skipped and logged.
+
+To run it by hand: Actions tab > Refresh events > Run workflow.
+
+## Updating the events by hand
 
 Edit `tools/events.json`, run `python3 tools/build_seed.py`, then paste the new `supabase/seed.sql` into the SQL Editor. Running it again updates existing events and adds new ones.
 

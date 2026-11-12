@@ -1,0 +1,39 @@
+name: Refresh events
+
+# Runs every day at 05:10 South African time, after any change to the event data, and on demand
+# (Actions tab > Refresh events > Run workflow).
+on:
+  schedule:
+    - cron: '10 3 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/**'
+      - 'tools/refresh.py'
+      - '.github/workflows/refresh.yml'
+
+concurrency:
+  group: refresh-events
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install database driver
+        run: pip install "psycopg[binary]==3.2.*"
+      - name: Refresh events
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
+          QUICKET_API_KEY: ${{ secrets.QUICKET_API_KEY }}
+        run: python tools/refresh.py

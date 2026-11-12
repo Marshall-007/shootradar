@@ -100,6 +100,26 @@ create table if not exists public.orders (
 );
 create index if not exists orders_gallery_idx on public.orders (gallery_id);
 
+-- Where each event came from, and when it was last checked against its source.
+alter table public.events add column if not exists origin text not null default 'user';
+alter table public.events add column if not exists checked_at timestamptz;
+
+-- One row per refresh: which sources were checked and what changed. Shown on the Data sources page.
+create table if not exists public.refresh_runs (
+  id bigint generated always as identity primary key,
+  ran_at timestamptz not null default now(),
+  kind text not null,
+  sources jsonb not null default '[]'::jsonb,
+  added integer not null default 0,
+  updated integer not null default 0,
+  removed integer not null default 0,
+  run_key text unique
+);
+alter table public.refresh_runs enable row level security;
+drop policy if exists refresh_runs_read on public.refresh_runs;
+create policy refresh_runs_read on public.refresh_runs for select to anon, authenticated using (true);
+grant select on public.refresh_runs to anon, authenticated;
+
 -- ---------- Row level security ----------
 alter table public.profiles enable row level security;
 alter table public.events enable row level security;

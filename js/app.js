@@ -5,8 +5,8 @@
   var TZ = 'Africa/Johannesburg';
   var CITIES = ['Johannesburg', 'Pretoria', 'Sun City', 'Cape Town', 'Durban'];
   var COORDS = { 'Johannesburg': [-26.2041, 28.0473], 'Pretoria': [-25.7479, 28.2293], 'Sun City': [-25.3346, 27.0927], 'Cape Town': [-33.9249, 18.4241], 'Durban': [-29.8587, 31.0218] };
-  var CATS = { concert: 'Concert', festival: 'Festival', sport: 'Sport', business: 'Business', glam: 'Glam and awards', festive: 'Festive and family', graduation: 'Graduation' };
-  var SHORT = { concert: 'Concert', festival: 'Festival', sport: 'Sport', business: 'Business', glam: 'Glam', festive: 'Festive', graduation: 'Graduation' };
+  var CATS = { concert: 'Concert', festival: 'Festival', sport: 'Sport', business: 'Business', glam: 'Glam and awards', festive: 'Festive and family', graduation: 'Graduation', arts: 'Arts and theatre' };
+  var SHORT = { concert: 'Concert', festival: 'Festival', sport: 'Sport', business: 'Business', glam: 'Glam', festive: 'Festive', graduation: 'Graduation', arts: 'Arts' };
   var ACCESS = {
     open: { label: 'Free public event', cls: 'good', f: 5 },
     ticket: { label: 'Ticket needed', cls: '', f: 3 },
@@ -251,7 +251,7 @@
           '<div class="fact"><h4>Camera access</h4><p><span class="pill ' + acc(ev).cls + '">' + esc(acc(ev).label) + '</span></p><p>' + esc(ev.access_note || '') + '</p></div>' +
           '<div class="fact"><h4>Tickets</h4><p>' + esc(t.seller || 'See listing') + '</p><p>' + esc(t.price || '') + (httpUrl(t.url) ? ', <a href="' + esc(t.url) + '" target="_blank" rel="noopener">Ticket site</a>' : '') + '</p></div>' +
           '<div class="fact"><h4>Light</h4><p>' + esc(lightNote(ev)) + '</p><p>' + (ev.outdoor ? 'Outdoor event' : 'Indoor event') + '</p></div>' +
-          '<div class="fact"><h4>Source</h4><p>' + (httpUrl(src.url) ? '<a href="' + esc(src.url) + '" target="_blank" rel="noopener">' + esc(src.name || 'Listing') + '</a>' : esc(src.name || 'Added in the app')) + '</p><p>' + (ev.created_by || ev.status === 'submitted' ? 'Added by a user' : 'Checked ' + esc(cfg.dataChecked || '')) + '</p></div>' +
+          '<div class="fact"><h4>Source</h4><p>' + (httpUrl(src.url) ? '<a href="' + esc(src.url) + '" target="_blank" rel="noopener">' + esc(src.name || 'Listing') + '</a>' : esc(src.name || 'Added in the app')) + '</p><p>' + (ev.created_by || ev.status === 'submitted' ? 'Added by a user' : 'Checked ' + esc(ev.checked_at ? fmt(new Date(ev.checked_at), { day: 'numeric', month: 'short', year: 'numeric' }) : (cfg.dataChecked || ''))) + ', <a href="#/sources" data-close>all sources</a></p></div>' +
         '</div>' +
         (ev.minors ? '<p class="note">Under-18s are likely here. Get a parent or guardian\'s consent before you photograph a child or share their photos.</p>' : '') +
         '<div class="sect"><h3>Organiser</h3>' + organiserHtml(ev) + '</div>' +
@@ -710,6 +710,36 @@
     load(false);
   }
 
+  /* ---------- data sources ---------- */
+  var PLAN = [
+    ['Checked every day', 'A job runs at about 05:10 and reads these feeds directly.', ['Ticketmaster South Africa (includes Big Concerts shows)', 'Quicket']],
+    ['Researched every week', 'Listings without a feed are searched and read, and new events are added with a link to the source.',
+      ['Ticket sellers: Webtickets, Howler, Ticketpro, Blu Blood, Computicket (partial: no public feed)', 'City listings: Gauteng Tourism, Time Out Johannesburg, Cape Town and Durban, What\'s On in Joburg, Bizcommunity',
+        'Venues: SunBet Arena, Sandton Convention Centre, FNB Stadium, CTICC, GrandWest, DHL Stadium, Durban ICC, Moses Mabhida, Kirstenbosch, Sun City',
+        'Sport: SA Rugby and URC fixtures, PSL, Cricket South Africa', 'Graduations: Wits, UJ, UP, Unisa, TUT, UCT, UWC, CPUT, UKZN, DUT']],
+    ['Added by people', 'Photographers, schools and organisers add events in the app. These show as Unverified or Added by a photographer.', ['The "Add an event or graduation" button']]
+  ];
+  function runDate(r) { return fmt(new Date(r.ran_at), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) + ', ' + fmtTime(new Date(r.ran_at)); }
+  function loadRuns() { return api.listRuns().then(function (runs) { state.runs = runs; paintFooter(); return runs; }, function () { state.runs = state.runs || []; return state.runs; }); }
+  function paintFooter() {
+    var el = document.getElementById('foot-data'), last = (state.runs || [])[0];
+    el.innerHTML = (last ? 'Events last refreshed on ' + esc(runDate(last)) + '. ' : 'Event details were checked on ' + esc(cfg.dataChecked || 'a recent date') + '. ') +
+      'Each event links to its source; plans change, so confirm with the organiser before you travel. <a href="#/sources">Data sources and refresh log</a>';
+  }
+  function viewSources() {
+    main.innerHTML = '<div class="head"><div><p class="kicker">Where the events come from</p><h1>Data sources</h1><p>What ShootRadar checks, how often, and what the last refreshes found.</p></div></div>' +
+      '<div class="cols"><div class="stack">' + PLAN.map(function (g) { return '<div class="panel"><h2>' + esc(g[0]) + '</h2><p class="hint">' + esc(g[1]) + '</p><ul class="srclist">' + g[2].map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>'; }).join('') + '</div>' +
+      '<div class="panel"><h2>Refresh log</h2><div id="runs" class="stack"><div class="empty">Loading...</div></div></div></div>';
+    loadRuns().then(function (runs) {
+      var box = document.getElementById('runs'); if (!box) return;
+      box.innerHTML = runs.length ? runs.map(function (r) {
+        return '<div class="order"><div class="order-top"><h4>' + esc(runDate(r)) + '</h4><span class="pill ' + (r.kind === 'feeds' ? 'good">Daily feeds' : 'hot">Weekly research') + '</span></div>' +
+          '<p class="hint">' + r.added + ' added, ' + r.updated + ' updated, ' + r.removed + ' removed</p><table class="srctable"><tbody>' +
+          (r.sources || []).map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td><span class="pill ' + (x.status === 'ok' ? 'good">Checked' : x.status === 'skipped' ? 'warn">Skipped' : 'stop">Failed') + '</span></td><td class="mono">' + esc(x.found == null ? '' : x.found) + '</td></tr>' + (x.note ? '<tr><td colspan="3" class="hint">' + esc(x.note) + '</td></tr>' : ''); }).join('') + '</tbody></table></div>';
+      }).join('') : '<div class="empty">No refresh has been recorded yet.</div>';
+    });
+  }
+
   /* ---------- router ---------- */
   function currentRoute() {
     var h = (location.hash || '').replace(/^#\/?/, ''), parts = h.split('/').filter(Boolean);
@@ -718,6 +748,7 @@
     if (parts[0] === 'gallery' && parts[1]) return { name: 'gallery-admin', arg: parts[1] };
     if (parts[0] === 'galleries') return { name: 'galleries' };
     if (parts[0] === 'profile') return { name: 'profile' };
+    if (parts[0] === 'sources') return { name: 'sources' };
     return { name: 'events' };
   }
   function route() {
@@ -732,6 +763,7 @@
     else if (r.name === 'galleries') viewGalleries();
     else if (r.name === 'gallery-admin') viewGalleryAdmin(r.arg);
     else if (r.name === 'profile') viewProfile();
+    else if (r.name === 'sources') viewSources();
     else if (r.name === 'gallery-client') viewClientGallery(r.arg);
     else viewClientOrder(r.arg);
     window.scrollTo(0, 0);
@@ -773,7 +805,7 @@
   (function start() {
     var q = new URLSearchParams(location.search), g = q.get('g'), o = q.get('o');
     if (g || o) { try { history.replaceState(null, '', location.pathname + (api.mode === 'demo' ? '?demo' : '') + '#/' + (g ? 'g/' + encodeURIComponent(g) : 'o/' + encodeURIComponent(o))); } catch (e) { location.hash = '#/' + (g ? 'g/' + g : 'o/' + o); } }
-    $('#foot-data').textContent = 'Event details were checked on ' + (cfg.dataChecked || 'a recent date') + ' against public listings; each event links to its source. Plans change, so confirm with the organiser before you travel.';
+    paintFooter(); loadRuns();
     $('#foot-help').href = waLink(cfg.supportWhatsApp, 'Hi, I have a problem with ShootRadar: ');
     if (api.mode === 'demo') { var flag = document.createElement('div'); flag.className = 'demo-flag'; flag.textContent = 'Demo mode: nothing is saved and everything resets when you reload.'; document.body.insertBefore(flag, document.getElementById('top')); }
     if (CITIES.indexOf(state.city) === -1) state.city = 'All';

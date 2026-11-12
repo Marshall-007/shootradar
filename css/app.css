@@ -362,3 +362,8 @@ body.client .foot #foot-data { display: none; }
 @media (max-width: 640px) { .tbtn .tl { display: none; } }
 .stamp span { color: var(--slate); font-weight: 500; }
 body.client .logo { pointer-events: none; }
+.band[data-cat="arts"], .dh[data-cat="arts"], .strip[data-cat="arts"] { background: #4d5b46; }
+.srclist { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 15px; }
+.srctable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.srctable td { padding: 5px 6px 5px 0; border-top: 1px solid var(--line); vertical-align: top; }
+.srctable td:nth-child(2), .srctable td:nth-child(3) { text-align: right; white-space: nowrap; }
