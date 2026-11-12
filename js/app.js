@@ -148,6 +148,7 @@
     else a.sort(function (x, y) { return S(x) - S(y); });
     return a;
   }
+  function dots(sc) { var on = Math.round(sc / 20), h = ''; for (var i = 1; i <= 5; i++) h += '<i' + (i <= on ? ' class="on"' : '') + '></i>'; return '<span class="dots" aria-hidden="true">' + h + '</span>'; }
   function passHtml(ev) {
     var s = S(ev), sc = score(ev), st = STATUS[ev.status] || STATUS['on-sale'], o = ev.organiser || {};
     var hasContact = o.phone || o.email;
@@ -166,7 +167,7 @@
         '<div class="facts"><span class="pill ' + acc(ev).cls + '">' + esc(acc(ev).label) + '</span><span class="pill ' + st[1] + '">' + esc(st[0]) + '</span>' +
           (hasContact ? '<span class="pill hot">Organiser contact</span>' : '') + (ev.minors ? '<span class="pill">Under-18s likely</span>' : '') + '</div>' +
       '</div>' +
-      '<div class="pass-foot"><span class="scorebox"><b aria-label="Photo score ' + sc + ' out of 100">' + sc + '</b> photo score</span>' +
+      '<div class="pass-foot"><span class="score">' + dots(sc) + '<b aria-label="Photo score ' + sc + ' out of 100">' + sc + '</b> photo score</span>' +
         '<button type="button" class="btn sm" data-open="' + esc(ev.id) + '">Open</button></div></article>';
   }
   function renderEventList() {
@@ -551,13 +552,13 @@
     var holder = document.createElement('div'), p = state.profile || {};
     try { new window.QRCode(holder, { text: galleryUrl(g.code), width: 560, height: 560, colorDark: '#111111', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M }); } catch (e) { toast('Could not make the poster.'); return; }
     var qr = holder.querySelector('canvas'), cv = document.createElement('canvas'); cv.width = 800; cv.height = 1100;
-    var c = cv.getContext('2d'); c.fillStyle = '#ffffff'; c.fillRect(0, 0, 800, 1100); c.fillStyle = '#17130f'; c.fillRect(0, 0, 800, 150);
+    var c = cv.getContext('2d'); c.fillStyle = '#ffffff'; c.fillRect(0, 0, 800, 1100); c.fillStyle = '#1b1814'; c.fillRect(0, 0, 800, 150);
     c.fillStyle = '#ffffff'; c.font = '800 54px "Bricolage Grotesque", Arial, sans-serif'; c.textAlign = 'center'; c.fillText('FIND YOUR PHOTOS', 400, 95);
-    c.fillStyle = '#17130f'; c.font = '600 32px "Instrument Sans", Arial, sans-serif'; c.fillText(g.title.length > 40 ? g.title.slice(0, 39) + '…' : g.title, 400, 215);
+    c.fillStyle = '#1b1814'; c.font = '600 32px "Instrument Sans", Arial, sans-serif'; c.fillText(g.title.length > 40 ? g.title.slice(0, 39) + '…' : g.title, 400, 215);
     if (qr) c.drawImage(qr, 120, 260, 560, 560);
     c.font = '500 30px Arial, sans-serif'; c.fillText('1. Scan   2. Tick your photos   3. Pay   4. Download', 400, 890);
     c.font = '700 56px "Spline Sans Mono", monospace'; c.fillText(g.code, 400, 975);
-    c.fillStyle = '#655c51'; c.font = '400 24px Arial, sans-serif'; c.fillText([p.brand || p.name, p.phone ? prettyPhone(p.phone) : ''].filter(Boolean).join('     '), 400, 1040);
+    c.fillStyle = '#635b50'; c.font = '400 24px Arial, sans-serif'; c.fillText([p.brand || p.name, p.phone ? prettyPhone(p.phone) : ''].filter(Boolean).join('     '), 400, 1040);
     cv.toBlob(function (b) { if (!b) return; var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'shootradar-' + g.code + '.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000); }, 'image/png');
   }
 
@@ -724,6 +725,7 @@
     clearTimeout(state.timer); lightbox.hidden = true; if (dlg.open) closeDialog();
     main.onclick = null; main.onchange = null; main.onsubmit = null; state.lbKey = null; state.lbStep = null;
     document.body.classList.toggle('client', client);
+    var logo = $('.logo'); if (logo) { if (client) { logo.removeAttribute('href'); logo.setAttribute('tabindex', '-1'); } else { logo.setAttribute('href', '#/events'); logo.removeAttribute('tabindex'); } }
     document.title = 'ShootRadar';
     $$('#nav a').forEach(function (a) { var on = a.dataset.nav === (r.name === 'gallery-admin' ? 'galleries' : r.name); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     if (r.name === 'events') viewEvents();
