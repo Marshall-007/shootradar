@@ -31,6 +31,14 @@ The project URL and publishable key are already in `js/config.js`. Never put the
 - Add `?demo` to the address to try everything without an account. Nothing is saved in demo mode.
 - Without `?demo`: create an account on the Profile tab, fill in your profile, create a gallery, upload two photos, then open the gallery link on another phone and request a photo.
 
+## After an update
+
+When `supabase/schema.sql` or `supabase/seed.sql` changes, paste the new version into the SQL Editor and run it again. Both are safe to rerun and keep existing galleries, photos and orders.
+
+## Install on a phone
+
+Open the site in Chrome on Android, then choose **Install app** (in Chrome's menu, or the button at the bottom of the page). It gets a home-screen icon and opens full-screen. On iPhone, use Safari's Share menu and **Add to Home Screen**.
+
 ## Free-plan limits to watch
 
 | Limit | Free allowance | What it means here |

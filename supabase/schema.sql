@@ -219,6 +219,17 @@ returns json language sql stable security definer set search_path = public as $$
   where o.code = upper(trim(p_code));
 $$;
 
+-- Lets a client who lost their page find it again with their WhatsApp number and order code.
+create or replace function public.find_order(p_code text, p_phone text)
+returns text language sql stable security definer set search_path = public as $$
+  select o.code from public.orders o
+  where o.code = case when upper(trim(p_code)) like 'SR-%' then upper(trim(p_code)) else 'SR-' || upper(trim(p_code)) end
+    and length(regexp_replace(coalesce(p_phone, ''), '\D', '', 'g')) >= 9
+    and right(regexp_replace(o.client_phone, '\D', '', 'g'), 9) = right(regexp_replace(p_phone, '\D', '', 'g'), 9);
+$$;
+revoke all on function public.find_order(text, text) from public;
+grant execute on function public.find_order(text, text) to anon, authenticated;
+
 revoke all on function public.get_gallery(text) from public;
 revoke all on function public.create_order(text, text, text, uuid[], boolean, boolean, boolean, text) from public;
 revoke all on function public.get_order(text) from public;

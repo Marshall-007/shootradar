@@ -35,8 +35,12 @@
       signUp: function (email, password) {
         return sb.auth.signUp({ email: email, password: password }).then(function (r) {
           if (r.error) fail(r.error);
-          user = r.data.session ? r.data.user : null;
-          return { needsConfirm: !r.data.session };
+          if (r.data.session) { user = r.data.user; return { needsConfirm: false }; }
+          // No session came back: try to sign in straight away. It only fails if email confirmation is switched on.
+          return sb.auth.signInWithPassword({ email: email, password: password }).then(function (r2) {
+            if (r2.error) { user = null; return { needsConfirm: true }; }
+            user = r2.data.user; return { needsConfirm: false };
+          });
         });
       },
       signIn: function (email, password) {
@@ -119,11 +123,18 @@
           .then(function () { return sb.from('photos').delete().eq('id', p.id); }).then(function (r) { ok(r); });
       },
       previewUrl: function (path) { return sb.storage.from('previews').getPublicUrl(path).data.publicUrl; },
-      markPaid: function (order, amount, photos) {
+      // Each link is signed for 14 days and carries a file name, so the browser saves the photo instead of opening it.
+      markPaid: function (order, amount, photos, nameFor) {
         var mine = photos.filter(function (p) { return order.photo_ids.indexOf(p.id) !== -1; });
-        return sb.storage.from('originals').createSignedUrls(mine.map(function (p) { return p.full_path; }), 60 * 60 * 24 * 14).then(function (r) {
-          var links = ok(r, 'Could not prepare the download links.').map(function (x, i) { return { seq: mine[i].seq, url: x.signedUrl }; }).filter(function (x) { return x.url; });
-          return sb.from('orders').update({ status: 'paid', amount: amount, downloads: links, paid_at: new Date().toISOString() }).eq('id', order.id).select().single();
+        return Promise.all(mine.map(function (p) {
+          var name = nameFor(p);
+          return sb.storage.from('originals').createSignedUrl(p.full_path, 60 * 60 * 24 * 14, { download: name }).then(function (r) {
+            return { seq: p.seq, name: name, url: ok(r, 'Could not prepare the download links.').signedUrl };
+          });
+        })).then(function (links) {
+          var row = { status: order.status === 'delivered' ? 'delivered' : 'paid', amount: amount, downloads: links };
+          if (!order.paid_at) row.paid_at = new Date().toISOString();
+          return sb.from('orders').update(row).eq('id', order.id).select().single();
         }).then(function (r) { return ok(r, 'Could not mark the order as paid.'); });
       },
       setOrderStatus: function (order, status) {
@@ -135,7 +146,8 @@
         return sb.rpc('create_order', { p_code: o.code, p_name: o.name, p_phone: o.phone, p_photo_ids: o.photoIds, p_consent: o.consent, p_portfolio: o.portfolio, p_offers: o.offers, p_guardian: o.guardian })
           .then(function (r) { return ok(r, 'Could not send your request.'); });
       },
-      getOrder: function (c) { return sb.rpc('get_order', { p_code: c }).then(function (r) { return ok(r, 'Could not find that order.'); }); }
+      getOrder: function (c) { return sb.rpc('get_order', { p_code: c }).then(function (r) { return ok(r, 'Could not find that order.'); }); },
+      findOrder: function (c, phone) { return sb.rpc('find_order', { p_code: c, p_phone: phone }).then(function (r) { return ok(r, 'Could not look up that order.') || null; }); }
     };
     return api;
   }
@@ -190,10 +202,11 @@
       },
       deletePhoto: function (p) { db.photos = db.photos.filter(function (x) { return x.id !== p.id; }); return later(); },
       previewUrl: function (path) { return db.blobs['p:' + path] || ''; },
-      markPaid: function (order, amount, photos) {
+      markPaid: function (order, amount, photos, nameFor) {
         var o = db.orders.filter(function (x) { return x.id === order.id; })[0];
-        o.status = 'paid'; o.amount = amount; o.paid_at = new Date().toISOString();
-        o.downloads = photos.filter(function (p) { return o.photo_ids.indexOf(p.id) !== -1; }).map(function (p) { return { seq: p.seq, url: db.blobs['f:' + p.full_path] }; });
+        if (o.status === 'requested') o.status = 'paid';
+        o.amount = amount; o.paid_at = o.paid_at || new Date().toISOString();
+        o.downloads = photos.filter(function (p) { return o.photo_ids.indexOf(p.id) !== -1; }).map(function (p) { return { seq: p.seq, name: nameFor(p), url: db.blobs['f:' + p.full_path] }; });
         return later(o);
       },
       setOrderStatus: function (order, status) { var o = db.orders.filter(function (x) { return x.id === order.id; })[0]; o.status = status; return later(o); },
@@ -225,6 +238,14 @@
           return { code: o.code, status: o.status, amount: o.amount, client_name: o.client_name, created_at: o.created_at, downloads: o.status === 'requested' ? [] : o.downloads,
             gallery: { code: g.code, title: g.title, price: g.price, bundle: g.bundle }, photographer: pubProfile(o.photographer_id),
             photos: db.photos.filter(function (p) { return o.photo_ids.indexOf(p.id) !== -1; }).sort(function (a, b) { return a.seq - b.seq; }).map(function (p) { return { id: p.id, seq: p.seq, path: p.preview_path }; }) };
+        });
+      },
+      findOrder: function (c, phone) {
+        return later(function () {
+          var want = String(c).trim().toUpperCase(); if (want.indexOf('SR-') !== 0) want = 'SR-' + want;
+          var digits = String(phone || '').replace(/\D/g, '').slice(-9);
+          var o = db.orders.filter(function (x) { return x.code === want && digits.length === 9 && String(x.client_phone).replace(/\D/g, '').slice(-9) === digits; })[0];
+          return o ? o.code : null;
         });
       }
     };

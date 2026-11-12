@@ -147,7 +147,7 @@
  },
  {
   "id": "lions-bulls-2026",
-  "name": "Lions vs Bulls · URC Jukskei derby",
+  "name": "Lions vs Bulls: URC Jukskei derby",
   "cat": "sport",
   "city": "Johannesburg",
   "venue": "Emirates Airline Park (Ellis Park)",
@@ -194,7 +194,7 @@
  },
  {
   "id": "jcole-2026",
-  "name": "J. Cole · The Fall-Off World Tour",
+  "name": "J. Cole: The Fall-Off World Tour",
   "cat": "concert",
   "city": "Johannesburg",
   "venue": "FNB Stadium",
@@ -304,7 +304,7 @@
   "end": "2026-12-04T23:00",
   "endEst": true,
   "doors": "Doors 18:00",
-  "show": "Support 20:00 · Sean Paul 21:00",
+  "show": "Support 20:00; Sean Paul 21:00",
   "crowd": {
    "basis": "capacity",
    "n": 8500,
@@ -390,7 +390,7 @@
  },
  {
   "id": "kehlani-pta-2026",
-  "name": "Kehlani · The Kehlani World Tour",
+  "name": "Kehlani: The Kehlani World Tour",
   "cat": "concert",
   "city": "Pretoria",
   "venue": "SunBet Arena, Time Square",
@@ -675,7 +675,7 @@
  },
  {
   "id": "shimza-ngc-2026",
-  "name": "Shimza Live · The Final Putt",
+  "name": "Shimza Live: The Final Putt",
   "cat": "festival",
   "city": "Sun City",
   "venue": "Sun Park, Sun City Resort",
@@ -969,7 +969,7 @@
  },
  {
   "id": "kehlani-cpt-2026",
-  "name": "Kehlani · The Kehlani World Tour",
+  "name": "Kehlani: The Kehlani World Tour",
   "cat": "concert",
   "city": "Cape Town",
   "venue": "Grand Arena, GrandWest",
@@ -1076,7 +1076,7 @@
   "end": "2026-12-06T23:00",
   "endEst": true,
   "doors": "Doors 18:00",
-  "show": "Support 20:00 · Sean Paul 21:00",
+  "show": "Support 20:00; Sean Paul 21:00",
   "crowd": {
    "basis": "capacity",
    "n": 6000,

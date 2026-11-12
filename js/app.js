@@ -18,7 +18,10 @@
   var STATUS = { 'on-sale': ['On sale', 'good'], tbc: ['Details TBC', 'warn'], verify: ['Verify first', 'warn'], free: ['Free entry', 'good'], user: ['Added by a photographer', 'hot'], submitted: ['Unverified', 'warn'] };
 
   var main = document.getElementById('main'), dlg = document.getElementById('dlg'), lightbox = document.getElementById('lightbox');
-  var state = { events: null, eventsError: '', profile: null, city: lsGet('city', 'All'), when: 'all', cat: 'all', sort: 'soonest', q: '', timer: null };
+  var state = { events: null, eventsError: '', profile: null, city: lsGet('city', 'All'), when: 'all', cat: 'all', sort: 'soonest', q: '', timer: null, limit: 0, lbKey: null };
+  function pageSize() { try { return window.matchMedia('(max-width: 640px)').matches ? 8 : 12; } catch (e) { return 12; } }
+  function pad3(n) { return ('00' + n).slice(-3); }
+  function slug(t) { return String(t || '').normalize('NFKD').replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).filter(Boolean).map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join('').slice(0, 30); }
 
   /* ---------- helpers ---------- */
   function $(s, el) { return (el || document).querySelector(s); }
@@ -79,15 +82,33 @@
   function lastDay(ev) { var e = E(ev); return fmtTime(e) === '00:00' ? new Date(e.getTime() - 60000) : e; }
   function endLabel(ev) { var t = fmtTime(E(ev)); if (t === '00:00') return 'midnight'; return t + (isoDay(E(ev)) !== isoDay(S(ev)) ? ' next day' : ''); }
   function whenText(ev) {
-    if (ev.days > 1) return fmtDay(S(ev)) + ' to ' + fmtDay(lastDay(ev)) + (ev.daily ? ' · ' + ev.daily : '');
+    if (ev.days > 1) return fmtDay(S(ev)) + ' to ' + fmtDay(lastDay(ev)) + (ev.daily ? ', ' + ev.daily : '');
     var parts = [];
     if (ev.doors) parts.push(ev.doors);
     if (ev.show) parts.push(ev.show);
     if (!parts.length) parts.push('Starts ' + fmtTime(S(ev)));
     parts.push('ends ' + (ev.end_est ? '~' : '') + endLabel(ev) + (ev.end_est ? ' (est.)' : ''));
     parts.push((Math.round(hours(ev) * 2) / 2) + ' h');
-    return parts.join(' · ');
+    return parts.join(', ');
   }
+  function timeLines(ev) {
+    var out = [];
+    function add(str) {
+      String(str).split(/\s\u00b7\s|;\s/).forEach(function (part) {
+        part = part.trim(); if (!part) return;
+        var m = part.match(/^([A-Za-z][A-Za-z \-]{1,13}?)\s+(~?\d{1,2}:\d{2})$/);
+        out.push(m ? [m[1], m[2]] : ['', part]);
+      });
+    }
+    if (ev.days > 1) { out.push(['Dates', fmtDay(S(ev)) + ' to ' + fmtDay(lastDay(ev))]); if (ev.daily) out.push(['Daily', ev.daily]); return out; }
+    if (ev.doors) add(ev.doors);
+    if (ev.show) add(ev.show);
+    if (!out.length) out.push(['Starts', fmtTime(S(ev))]);
+    out.push(['Ends', (ev.end_est ? '~' : '') + endLabel(ev) + (ev.end_est ? ' (est.)' : '')]);
+    out.push(['Length', (Math.round(hours(ev) * 2) / 2) + ' hours']);
+    return out;
+  }
+  function timesHtml(ev) { return '<ul class="times">' + timeLines(ev).map(function (l) { return l[0] ? '<li><span>' + esc(l[0]) + '</span><em>' + esc(l[1]) + '</em></li>' : '<li class="full">' + esc(l[1]) + '</li>'; }).join('') + '</ul>'; }
   function sunset(day, lat, lng) {
     var y = +day.slice(0, 4), m = +day.slice(5, 7), d = +day.slice(8, 10);
     var doy = Math.round((Date.UTC(y, m - 1, d) - Date.UTC(y, 0, 0)) / 864e5), g = 2 * Math.PI / 365 * (doy - 1);
@@ -96,7 +117,7 @@
     var r = Math.PI / 180, cosH = Math.cos(90.833 * r) / (Math.cos(lat * r) * Math.cos(decl)) - Math.tan(lat * r) * Math.tan(decl);
     return 720 - 4 * (lng - Math.acos(Math.max(-1, Math.min(1, cosH))) / r) - eq + 120;
   }
-  function lightNote(ev) { var c = COORDS[ev.city]; if (!c) return ''; var ss = sunset(isoDay(S(ev)), c[0], c[1]); return 'Sunset ' + hhmm(ss) + ' · golden light from about ' + hhmm(ss - 60); }
+  function lightNote(ev) { var c = COORDS[ev.city]; if (!c) return ''; var ss = sunset(isoDay(S(ev)), c[0], c[1]); return 'Sunset ' + hhmm(ss) + ', golden light from about ' + hhmm(ss - 60); }
   function upcoming(ev) { return E(ev).getTime() >= Date.now(); }
   function byId(id) { return (state.events || []).filter(function (e) { return e.id === id; })[0] || null; }
 
@@ -127,22 +148,25 @@
     else a.sort(function (x, y) { return S(x) - S(y); });
     return a;
   }
-  function dots(sc) { var on = Math.round(sc / 20), h = ''; for (var i = 1; i <= 5; i++) h += '<i' + (i <= on ? ' class="on"' : '') + '></i>'; return '<span class="dots" aria-hidden="true">' + h + '</span>'; }
   function passHtml(ev) {
     var s = S(ev), sc = score(ev), st = STATUS[ev.status] || STATUS['on-sale'], o = ev.organiser || {};
     var hasContact = o.phone || o.email;
     return '<article class="pass">' +
+      '<button type="button" class="rowcard" data-open="' + esc(ev.id) + '"><span class="strip" data-cat="' + esc(ev.cat) + '"></span>' +
+        '<span class="d"><b>' + fmt(s, { day: 'numeric' }) + '</b><span>' + fmt(s, { month: 'short' }) + '</span><span>' + fmt(s, { weekday: 'short' }) + '</span></span>' +
+        '<span class="t"><strong>' + esc(ev.name) + '</strong><small>' + esc(ev.city + ', ' + crowdText(ev).toLowerCase()) + '</small></span>' +
+        '<span class="s" aria-label="Photo score ' + sc + '">' + sc + '</span></button>' +
       '<div class="band" data-cat="' + esc(ev.cat) + '"><span>' + esc(SHORT[ev.cat] || ev.cat) + '</span><span>' + esc(ev.city) + '</span></div>' +
       '<div class="pass-body">' +
         '<h3>' + esc(ev.name) + '</h3>' +
         '<div class="stamp" aria-hidden="true"><b>' + fmt(s, { day: 'numeric' }) + '</b><span>' + fmt(s, { month: 'short' }) + '</span><span>' + fmt(s, { weekday: 'short' }) + '</span></div>' +
         '<p class="where">' + esc(ev.venue) + (ev.area && ev.venue.indexOf(ev.area) === -1 ? ', ' + esc(ev.area) : '') + '</p>' +
-        '<p class="when">' + esc(whenText(ev)) + '</p>' +
+        timesHtml(ev) +
         '<div class="facts"><span class="crowd">' + esc(crowdText(ev)) + '<small>' + esc(BASIS[(ev.crowd || {}).basis] || 'Our estimate') + '</small></span></div>' +
         '<div class="facts"><span class="pill ' + acc(ev).cls + '">' + esc(acc(ev).label) + '</span><span class="pill ' + st[1] + '">' + esc(st[0]) + '</span>' +
           (hasContact ? '<span class="pill hot">Organiser contact</span>' : '') + (ev.minors ? '<span class="pill">Under-18s likely</span>' : '') + '</div>' +
       '</div>' +
-      '<div class="pass-foot"><span class="score">' + dots(sc) + '<b aria-label="Photo score ' + sc + ' out of 100">' + sc + '</b> photo score</span>' +
+      '<div class="pass-foot"><span class="scorebox"><b aria-label="Photo score ' + sc + ' out of 100">' + sc + '</b> photo score</span>' +
         '<button type="button" class="btn sm" data-open="' + esc(ev.id) + '">Open</button></div></article>';
   }
   function renderEventList() {
@@ -156,7 +180,10 @@
     chips.innerHTML = ['All'].concat(cities).map(function (c) { return '<button type="button" class="chip" data-city="' + esc(c) + '" aria-pressed="' + (state.city === c) + '">' + esc(c === 'All' ? 'All cities' : c) + ' <i>' + (counts[c] || 0) + '</i></button>'; }).join('');
     var list = sorted(state.events.filter(function (ev) { return passes(ev, false); }));
     var note = state.cat === 'graduation' ? '<p class="note" style="grid-column:1/-1">Most universities graduate between March and June, so December is quiet. Many campuses appoint one official photographer and ban others near the hall: read the camera access note before you go. Know of a school or preschool graduation? Add it with the button above.</p>' : '';
-    grid.innerHTML = note + (list.length ? list.map(passHtml).join('') : '<div class="empty">No events match. Try another city or type, or add one you know about.</div>');
+    if (!state.limit) state.limit = pageSize();
+    var left = list.length - state.limit;
+    grid.innerHTML = note + (list.length ? list.slice(0, state.limit).map(passHtml).join('') + (left > 0 ? '<div class="more" style="grid-column:1/-1"><button type="button" class="btn line" id="more">Show more (' + left + ' left)</button></div>' : '') : '<div class="empty">No events match. Try another city or type, or add one you know about.</div>');
+    var active = (state.cat !== 'all') + (state.when !== 'all') + (state.sort !== 'soonest') + (state.q ? 1 : 0), ft = $('#f-toggle'); if (ft) ft.textContent = 'Filters' + (active ? ' (' + active + ')' : '');
     var w = weekend(), wk = list.filter(function (ev) { return S(ev).getTime() < w[1] && E(ev).getTime() >= w[0]; }).length;
     var best = list.slice().sort(function (a, b) { return score(b) - score(a); })[0];
     sum.innerHTML = list.length ? '<span><b>' + list.length + '</b> events</span><span><b>' + wk + '</b> this weekend</span>' + (best ? '<span>Top photo score: <b>' + score(best) + '</b> ' + esc(best.name) + '</span>' : '') : '';
@@ -168,15 +195,16 @@
   }
   function viewEvents() {
     main.innerHTML =
-      '<div class="head"><div><p class="kicker">South Africa · 5 cities</p><h1>Events worth shooting</h1><p>Pick a city, open an event for times, crowd, camera rules and the organiser\'s contact details.</p></div>' +
+      '<div class="head"><div><p class="kicker">South Africa, 5 cities</p><h1>Events worth shooting</h1><p>Pick a city, open an event for times, crowd, camera rules and the organiser\'s contact details.</p></div>' +
       '<button class="btn line" type="button" id="add-event">Add an event or graduation</button></div>' +
       '<div class="filters"><div class="chips" id="chips" role="group" aria-label="City"></div>' +
-      '<div class="frow">' +
+      '<div class="row"><button type="button" class="btn sm line f-toggle" id="f-toggle">Filters</button></div>' +
+      '<div class="frow" id="frow"><div class="sheet-head"><span>Filters</span><button type="button" class="btn sm line" data-sheet-close>Close</button></div>' +
         '<label class="f" for="f-cat">Type<select id="f-cat"><option value="all">All types</option>' + Object.keys(CATS).map(function (k) { return '<option value="' + k + '">' + CATS[k] + '</option>'; }).join('') + '</select></label>' +
         '<label class="f" for="f-when">When<select id="f-when"><option value="all">All upcoming</option><option value="weekend">This weekend</option><option value="week">Next 7 days</option><option value="month">Next 30 days</option></select></label>' +
         '<label class="f" for="f-sort">Sort<select id="f-sort"><option value="soonest">Soonest first</option><option value="score">Best photo score</option><option value="crowd">Biggest crowd</option></select></label>' +
         '<label class="f q" for="f-q">Search<input id="f-q" type="search" placeholder="Artist, venue, organiser" autocomplete="off"></label>' +
-      '</div></div><div class="sum" id="sum" aria-live="polite"></div><div class="passes" id="grid"></div>';
+      '<div class="sheet-foot"><button type="button" class="btn wide" data-sheet-close>Show events</button></div></div></div><div class="sum" id="sum" aria-live="polite"></div><div class="passes" id="grid"></div>';
     $('#f-cat').value = state.cat; $('#f-when').value = state.when; $('#f-sort').value = state.sort; $('#f-q').value = state.q;
     renderEventList();
     loadEvents().then(renderEventList);
@@ -211,16 +239,16 @@
     var map = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(ev.venue + ', ' + (ev.address || ev.city));
     var subject = 'Photographer accreditation request: ' + ev.name + ' (' + fmtDay(s) + ')';
     showDialog(
-      '<div class="dh" data-cat="' + esc(ev.cat) + '"><div><h2 id="dlg-title">' + esc(ev.name) + '</h2><p>' + esc((CATS[ev.cat] || ev.cat) + ' · ' + ev.city + ' · ' + st[0] + ' · photo score ' + sc + ' (' + scoreWord(sc) + ')') + '</p></div><button class="dx" type="button" data-close>Close</button></div>' +
+      '<div class="dh" data-cat="' + esc(ev.cat) + '"><div><h2 id="dlg-title">' + esc(ev.name) + '</h2><p>' + esc((CATS[ev.cat] || ev.cat) + ', ' + ev.city + ', ' + st[0] + ', photo score ' + sc + ' (' + scoreWord(sc) + ')') + '</p></div><button class="dx" type="button" data-close>Close</button></div>' +
       '<div class="db">' +
         (ev.status === 'verify' || ev.status === 'submitted' ? '<p class="note">This listing has not been verified. Confirm the details with the organiser before you plan around it.</p>' : '') +
         '<div class="fg">' +
-          '<div class="fact"><h4>When</h4><p>' + esc(ev.days > 1 ? fmtDay(s) + ' to ' + fmtDay(lastDay(ev)) : fmtLong(s)) + '</p><p class="mono">' + esc(whenText(ev)) + '</p>' + (ev.time_note ? '<p>' + esc(ev.time_note) + '</p>' : '') + '</div>' +
-          '<div class="fact"><h4>Start, end, duration</h4><p>Starts ' + fmtTime(s) + ', ends ' + (ev.end_est ? 'about ' : '') + (ev.days > 1 ? fmtTime(E(ev)) + ' on the last day' : endLabel(ev)) + '</p><p>' + (ev.days > 1 ? ev.days + ' days' : (Math.round(hours(ev) * 2) / 2) + ' hours') + (ev.end_est ? ' (end time estimated)' : '') + ' · times in SAST</p></div>' +
-          '<div class="fact"><h4>Where</h4><p>' + esc(ev.venue) + '</p><p>' + esc(ev.address || ev.city) + ' · <a href="' + esc(map) + '" target="_blank" rel="noopener">Open map</a></p></div>' +
+          '<div class="fact"><h4>When</h4><p>' + esc(ev.days > 1 ? fmtDay(s) + ' to ' + fmtDay(lastDay(ev)) : fmtLong(s)) + '</p>' + timesHtml(ev) + (ev.time_note ? '<p>' + esc(ev.time_note) + '</p>' : '') + '</div>' +
+          '<div class="fact"><h4>Start, end, duration</h4><p>Starts ' + fmtTime(s) + ', ends ' + (ev.end_est ? 'about ' : '') + (ev.days > 1 ? fmtTime(E(ev)) + ' on the last day' : endLabel(ev)) + '</p><p>' + (ev.days > 1 ? ev.days + ' days' : (Math.round(hours(ev) * 2) / 2) + ' hours') + (ev.end_est ? ' (end time estimated)' : '') + ', times in SAST</p></div>' +
+          '<div class="fact"><h4>Where</h4><p>' + esc(ev.venue) + '</p><p>' + esc(ev.address || ev.city) + ', <a href="' + esc(map) + '" target="_blank" rel="noopener">Open map</a></p></div>' +
           '<div class="fact"><h4>Crowd</h4><p>' + esc(crowdText(ev)) + '</p><p>' + esc((BASIS[c.basis] || 'Our estimate') + (c.note ? ': ' + c.note : '')) + '</p></div>' +
           '<div class="fact"><h4>Camera access</h4><p><span class="pill ' + acc(ev).cls + '">' + esc(acc(ev).label) + '</span></p><p>' + esc(ev.access_note || '') + '</p></div>' +
-          '<div class="fact"><h4>Tickets</h4><p>' + esc(t.seller || 'See listing') + '</p><p>' + esc(t.price || '') + (httpUrl(t.url) ? ' · <a href="' + esc(t.url) + '" target="_blank" rel="noopener">Ticket site</a>' : '') + '</p></div>' +
+          '<div class="fact"><h4>Tickets</h4><p>' + esc(t.seller || 'See listing') + '</p><p>' + esc(t.price || '') + (httpUrl(t.url) ? ', <a href="' + esc(t.url) + '" target="_blank" rel="noopener">Ticket site</a>' : '') + '</p></div>' +
           '<div class="fact"><h4>Light</h4><p>' + esc(lightNote(ev)) + '</p><p>' + (ev.outdoor ? 'Outdoor event' : 'Indoor event') + '</p></div>' +
           '<div class="fact"><h4>Source</h4><p>' + (httpUrl(src.url) ? '<a href="' + esc(src.url) + '" target="_blank" rel="noopener">' + esc(src.name || 'Listing') + '</a>' : esc(src.name || 'Added in the app')) + '</p><p>' + (ev.created_by || ev.status === 'submitted' ? 'Added by a user' : 'Checked ' + esc(cfg.dataChecked || '')) + '</p></div>' +
         '</div>' +
@@ -230,7 +258,7 @@
           '<div class="row" style="margin-top:8px"><button type="button" class="btn sm" id="pitch-copy">Copy</button>' +
           (o.email ? '<a class="btn sm line" id="pitch-mail" href="#">Email organiser</a>' : '') +
           (normPhone(o.phone) && /^27[678]/.test(normPhone(o.phone)) ? '<a class="btn sm line" id="pitch-wa" target="_blank" rel="noopener" href="#">WhatsApp organiser</a>' : '') + '</div>' +
-          (!p.name ? '<p class="hint" style="margin-top:6px">Fill in your <a href="#/profile" data-close>profile</a> and your name, studio and number appear here.</p>' : '') + '</div>' +
+          (!p.name ? '<p class="hint" id="pitch-hint" style="margin-top:6px">' + (api.user() ? 'Fill in your <a href="#/profile" data-close>profile</a>' : '<a href="#/profile" data-close>Sign in</a> and fill in your profile') + ' and your name, studio and number appear here.</p>' : '') + '</div>' +
         (ev.tips ? '<div class="sect"><h3>Shoot plan</h3><p>' + esc(ev.tips) + '</p><div class="row" style="margin-top:8px">' + (ev.tags || []).map(function (x) { return '<span class="pill">' + esc(x) + '</span>'; }).join('') + '</div></div>' : '') +
         '<div class="sect"><h3>Why it scores ' + sc + '</h3><div class="bars">' + barRow('Crowd size', SIZE[sizeOf(ev)].f) + barRow('Access', acc(ev).f) + barRow('Glam', f.glam == null ? 2 : f.glam) + barRow('Celebrities', f.celebs == null ? 1 : f.celebs) + barRow('Spending power', f.spend == null ? 3 : f.spend) + '</div></div>' +
         '<div class="sect"><h3>Is it worth going?</h3><div class="calc">' +
@@ -240,7 +268,7 @@
           '<label class="f" for="k-s">Average sale (R)<input type="number" id="k-s" min="0" value="' + (p.price ? Math.min(p.price * 2, p.bundle || p.price * 2) : 120) + '"></label>' +
           '<label class="f" for="k-c">Your costs (R)<input type="number" id="k-c" min="0" value="350"></label></div><p id="k-out" style="margin-top:10px" aria-live="polite"></p></div>' +
         '<div class="row"><button type="button" class="btn hot" data-newgal="' + esc(ev.id) + '">Create a gallery for this event</button>' +
-          '<a class="btn line" target="_blank" rel="noopener" href="' + esc(waLink('', ev.name + '\n' + fmtDay(s) + ' · ' + whenText(ev) + '\n' + ev.venue + ', ' + ev.city + '\nCrowd: ' + crowdText(ev) + (httpUrl(src.url) ? '\n' + src.url : '') + '\nFound on ShootRadar')) + '">Share on WhatsApp</a>' +
+          '<a class="btn line" target="_blank" rel="noopener" href="' + esc(waLink('', ev.name + '\n' + fmtDay(s) + ', ' + whenText(ev) + '\n' + ev.venue + ', ' + ev.city + '\nCrowd: ' + crowdText(ev) + (httpUrl(src.url) ? '\n' + src.url : '') + '\nFound on ShootRadar')) + '">Share on WhatsApp</a>' +
           (mine ? '<button type="button" class="btn line danger" data-delevent="' + esc(ev.id) + '">Delete my event</button>' : '') + '</div>' +
       '</div>', ev.cat);
     function calc() {
@@ -249,6 +277,16 @@
       $('#k-out', dlg).innerHTML = 'About <b>' + Math.round(sales) + '</b> sales, <b>' + money(rev) + '</b> revenue, <b>' + money(profit) + '</b> ' + (profit >= 0 ? 'profit' : 'loss') + '. Break-even after <b>' + (g('k-s') > 0 ? Math.ceil(g('k-c') / g('k-s')) : 0) + '</b> sales.';
     }
     calc(); $$('.calc input', dlg).forEach(function (i) { i.addEventListener('input', calc); });
+    // Signed in but the profile has not loaded yet: fetch it and fill the message with the real details.
+    if (api.user() && !(state.profile && state.profile.name)) {
+      var before = $('#pitch', dlg).value;
+      api.getProfile().then(function (pr) {
+        var box = $('#pitch', dlg);
+        if (!pr || !pr.name || !box || box.value !== before) return;
+        state.profile = pr; box.value = pitch(ev);
+        var h = $('#pitch-hint', dlg); if (h) h.remove();
+      }, function () { });
+    }
     $('#pitch-copy', dlg).addEventListener('click', function () { copy($('#pitch', dlg).value, 'Message copied.'); });
     var m = $('#pitch-mail', dlg); if (m) m.addEventListener('click', function () { m.href = 'mailto:' + o.email + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent($('#pitch', dlg).value); });
     var w = $('#pitch-wa', dlg); if (w) w.addEventListener('click', function () { w.href = waLink(o.phone, $('#pitch', dlg).value); });
@@ -385,7 +423,7 @@
     var evs = (state.events || []).filter(function (e) { return E(e).getTime() > now - 3 * 864e5; }).sort(function (a, b) { return S(a) - S(b); });
     showDialog('<div class="dh"><div><h2 id="dlg-title">New gallery</h2><p>You get a QR code as soon as it is created.</p></div><button class="dx" type="button" data-close>Close</button></div>' +
       '<form class="db" id="gal-form" novalidate><div class="grid2">' +
-        '<label class="f full" for="g-event">Event<select id="g-event"><option value="">Another event (type the name below)</option>' + evs.map(function (e) { return '<option value="' + esc(e.id) + '"' + (e.id === eventId ? ' selected' : '') + '>' + esc(fmtDay(S(e)) + ' · ' + e.name) + '</option>'; }).join('') + '</select></label>' +
+        '<label class="f full" for="g-event">Event<select id="g-event"><option value="">Another event (type the name below)</option>' + evs.map(function (e) { return '<option value="' + esc(e.id) + '"' + (e.id === eventId ? ' selected' : '') + '>' + esc(fmtDay(S(e)) + ', ' + e.name) + '</option>'; }).join('') + '</select></label>' +
         '<label class="f full" for="g-title">Gallery name (clients see this)<input type="text" id="g-title" maxlength="90"></label>' +
         '<label class="f" for="g-date">Shoot date<input type="date" id="g-date"></label><span></span>' +
         '<label class="f" for="g-price">Price per photo (R)<input type="number" id="g-price" min="0" step="5" value="' + esc(p.price == null ? 60 : p.price) + '"></label>' +
@@ -428,7 +466,7 @@
   function makeVersions(file, brand, seq) {
     return loadImage(file).then(function (src) {
       var full = draw(src, 2000), pv = draw(src, 1000); src.done();
-      var g = pv.getContext('2d'), w = pv.width, h = pv.height, fs = Math.max(13, Math.round(Math.max(w, h) / 24)), mark = (brand || 'ShootRadar') + '  ·  PREVIEW  ·  #' + seq;
+      var g = pv.getContext('2d'), w = pv.width, h = pv.height, fs = Math.max(13, Math.round(Math.max(w, h) / 24)), mark = (brand || 'ShootRadar') + '  /  PREVIEW  /  #' + seq;
       g.save(); g.translate(w / 2, h / 2); g.rotate(-Math.PI / 7);
       g.font = '600 ' + fs + 'px "Instrument Sans", Arial, sans-serif'; g.fillStyle = 'rgba(255,255,255,0.4)'; g.strokeStyle = 'rgba(0,0,0,0.3)'; g.lineWidth = Math.max(1, fs / 16);
       var tw = g.measureText(mark).width + fs * 2, span = Math.max(w, h) * 1.2;
@@ -450,19 +488,20 @@
       var payMsg = 'Hi ' + firstName(o.client_name) + '! Your ' + seqs.length + ' photo' + (seqs.length === 1 ? '' : 's') + ' from ' + g.title + ' ' + (seqs.length === 1 ? 'is' : 'are') + ' reserved (order ' + o.code + ').\nTotal: R' + o.amount + '.\n' + (pr.pay_link ? 'Pay here: ' + pr.pay_link + '\n' : '') + 'Use reference ' + o.code + '. Once you have paid, your clean photos unlock here: ' + link;
       var doneMsg = 'Thank you, ' + firstName(o.client_name) + '! Payment received for order ' + o.code + '. Download your photos here (the link works for 14 days): ' + link + '\nThey are for your personal use; please tag ' + (pr.brand || pr.name || 'me') + ' when you post them.';
       return '<div class="order" data-order="' + esc(o.id) + '"><div class="order-top"><h4>' + esc(o.client_name) + '</h4><span class="row"><span class="pill mono">' + esc(o.code) + '</span><span class="pill ' + (o.status === 'requested' ? 'warn">Waiting for payment' : o.status === 'paid' ? 'good">Paid' : 'good">Delivered') + '</span></span></div>' +
-        '<p class="hint">' + (o.client_phone ? 'WhatsApp ' + esc(prettyPhone(o.client_phone)) + ' · ' : '') + esc(seqs.length + ' photo' + (seqs.length === 1 ? '' : 's') + ': ' + seqs.join(', ')) + (o.guardian ? ' · guardian: ' + esc(o.guardian) : '') + '</p>' +
+        '<p class="hint">' + (o.client_phone ? 'WhatsApp ' + esc(prettyPhone(o.client_phone)) + ', ' : '') + esc(seqs.length + ' photo' + (seqs.length === 1 ? '' : 's') + ': ' + seqs.join(', ')) + (o.guardian ? ', guardian: ' + esc(o.guardian) : '') + '</p>' +
         '<div class="row"><span class="pill ' + (o.portfolio ? 'good">Portfolio use OK' : '">No portfolio use') + '</span><span class="pill ' + (o.offers ? 'good">Wants offers' : '">No marketing') + '</span></div>' +
         '<div class="row"><label class="vh" for="amt-' + esc(o.id) + '">Amount in rand</label><input class="amt" type="number" min="0" id="amt-' + esc(o.id) + '" value="' + esc(o.amount) + '">' +
           (paid ? '' : '<button type="button" class="btn sm hot" data-paid="' + esc(o.id) + '">Mark as paid</button>') +
           '<a class="btn sm line" target="_blank" rel="noopener" href="' + esc(waLink(o.client_phone, paid ? doneMsg : payMsg)) + '">' + (paid ? 'Send download link' : 'Send payment message') + '</a>' +
           (o.status === 'paid' ? '<button type="button" class="btn sm line" data-delivered="' + esc(o.id) + '">Mark delivered</button>' : '') +
+          (paid ? '<button type="button" class="btn sm line" data-relink="' + esc(o.id) + '">Renew download links</button>' : '') +
           '<button type="button" class="btn sm line danger" data-delorder="' + esc(o.id) + '">Remove</button></div></div>';
     }
     function paint() {
       var g = data.gallery, url = galleryUrl(g.code), bytes = data.photos.reduce(function (s, p) { return s + (p.bytes || 0); }, 0);
       var paidOrders = data.orders.filter(function (o) { return o.status !== 'requested'; });
       main.innerHTML = '<p style="margin-bottom:10px"><a href="#/galleries">&larr; All galleries</a></p>' +
-        '<div class="head"><div><p class="kicker">Gallery ' + esc(g.code) + (g.kids ? ' · children\'s event' : '') + '</p><h1>' + esc(g.title) + '</h1><p>' + (g.event_date ? esc(fmtLong(sast(g.event_date, '12:00'))) + ' · ' : '') + 'R' + g.price + ' per photo' + (g.bundle ? ', R' + g.bundle + ' for all of one client\'s photos' : '') + '</p></div></div>' +
+        '<div class="head"><div><p class="kicker">Gallery ' + esc(g.code) + (g.kids ? ', children\'s event' : '') + '</p><h1>' + esc(g.title) + '</h1><p>' + (g.event_date ? esc(fmtLong(sast(g.event_date, '12:00'))) + ', ' : '') + 'R' + g.price + ' per photo' + (g.bundle ? ', R' + g.bundle + ' for all of one client\'s photos' : '') + '</p></div></div>' +
         '<div class="tiles"><div class="tile"><span>Photos</span><b>' + data.photos.length + '</b></div><div class="tile"><span>Requests</span><b>' + data.orders.length + '</b></div><div class="tile"><span>Paid</span><b>' + paidOrders.length + '</b></div><div class="tile"><span>Revenue</span><b>' + money(paidOrders.reduce(function (s, o) { return s + o.amount; }, 0)) + '</b></div></div>' +
         '<div class="cols"><div class="stack"><div class="panel"><h2>Share with clients</h2><div class="qrbox"><div class="qr" id="qr"></div><strong>' + esc(g.code) + '</strong><small>Scan to find your photos</small></div>' +
           '<div class="linkbox" id="g-link">' + esc(url) + '</div><div class="row"><button type="button" class="btn sm" id="copy-link">Copy link</button><button type="button" class="btn sm line" id="poster">Save QR poster</button>' +
@@ -477,6 +516,7 @@
       try { new window.QRCode($('#qr'), { text: url, width: 196, height: 196, colorDark: '#111111', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M }); } catch (e) { $('#qr').textContent = 'QR unavailable'; }
     }
     function find(list, oid) { return list.filter(function (x) { return x.id === oid; })[0]; }
+    function nameFor(p) { var pr = state.profile || {}; return [slug(pr.brand || pr.name) || 'ShootRadar', slug(data.gallery.title), pad3(p.seq)].filter(Boolean).join('-') + '.jpg'; }
     main.onclick = function (e) {
       var t = e.target.closest('button'); if (!t || !data) return;
       if (t.id === 'copy-link') copy(galleryUrl(data.gallery.code), 'Gallery link copied.');
@@ -484,7 +524,8 @@
       else if (t.id === 'poster') savePoster(data.gallery);
       else if (t.id === 'del-gal') { if (t.dataset.sure) { busy(t, true, 'Deleting...'); api.deleteGallery(id).then(function () { toast('Gallery deleted.'); location.hash = '#/galleries'; }, function (er) { busy(t, false); toast(er.message); }); } else { t.dataset.sure = '1'; t.textContent = 'Tap again to delete everything'; } }
       else if (t.dataset.delphoto) { if (t.dataset.sure) { api.deletePhoto(find(data.photos, t.dataset.delphoto)).then(refresh, function (er) { toast(er.message); }); } else { t.dataset.sure = '1'; t.textContent = 'Sure?'; } }
-      else if (t.dataset.paid) { var o = find(data.orders, t.dataset.paid), amt = Math.max(0, Math.round(+$('#amt-' + o.id).value || 0)); busy(t, true, 'Unlocking...'); api.markPaid(o, amt, data.photos).then(function () { toast('Marked as paid. The client\'s photos are unlocked.'); return refresh(); }, function (er) { busy(t, false); toast(er.message); }); }
+      else if (t.dataset.paid) { var o = find(data.orders, t.dataset.paid), amt = Math.max(0, Math.round(+$('#amt-' + o.id).value || 0)); busy(t, true, 'Unlocking...'); api.markPaid(o, amt, data.photos, nameFor).then(function () { toast('Marked as paid. The client\'s photos are unlocked.'); return refresh(); }, function (er) { busy(t, false); toast(er.message); }); }
+      else if (t.dataset.relink) { var ro = find(data.orders, t.dataset.relink); busy(t, true, 'Renewing...'); api.markPaid(ro, ro.amount, data.photos, nameFor).then(function () { toast('New download links are ready for 14 days.'); return refresh(); }, function (er) { busy(t, false); toast(er.message); }); }
       else if (t.dataset.delivered) api.setOrderStatus(find(data.orders, t.dataset.delivered), 'delivered').then(refresh, function (er) { toast(er.message); });
       else if (t.dataset.delorder) { if (t.dataset.sure) api.deleteOrder(find(data.orders, t.dataset.delorder)).then(refresh, function (er) { toast(er.message); }); else { t.dataset.sure = '1'; t.textContent = 'Tap again to remove'; } }
     };
@@ -516,7 +557,7 @@
     if (qr) c.drawImage(qr, 120, 260, 560, 560);
     c.font = '500 30px Arial, sans-serif'; c.fillText('1. Scan   2. Tick your photos   3. Pay   4. Download', 400, 890);
     c.font = '700 56px "Spline Sans Mono", monospace'; c.fillText(g.code, 400, 975);
-    c.fillStyle = '#655c51'; c.font = '400 24px Arial, sans-serif'; c.fillText([p.brand || p.name, p.phone ? prettyPhone(p.phone) : ''].filter(Boolean).join('  ·  '), 400, 1040);
+    c.fillStyle = '#655c51'; c.font = '400 24px Arial, sans-serif'; c.fillText([p.brand || p.name, p.phone ? prettyPhone(p.phone) : ''].filter(Boolean).join('     '), 400, 1040);
     cv.toBlob(function (b) { if (!b) return; var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'shootradar-' + g.code + '.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000); }, 'image/png');
   }
 
@@ -528,31 +569,53 @@
       if (!d) { main.innerHTML = '<div class="empty">We could not find a gallery with the code ' + esc(code) + '. Check the code on the photographer\'s card and try again.</div>'; return; }
       data = d; picked = picked.filter(function (pid) { return d.photos.some(function (p) { return p.id === pid; }); });
       var g = d.gallery, ph = d.photographer;
-      document.title = g.title + ' · ShootRadar';
+      document.title = g.title + ', ShootRadar';
       main.innerHTML = '<div class="ghead"><p class="kicker" style="color:inherit;opacity:.75">Photos by ' + esc(ph.brand || ph.name || 'your photographer') + '</p><h1>' + esc(g.title) + '</h1>' +
-        '<p>' + (g.event_date ? esc(fmtLong(sast(g.event_date, '12:00'))) + ' · ' : '') + 'R' + g.price + ' per photo' + (g.bundle ? ' · R' + g.bundle + ' for all of yours' : '') + '</p></div>' +
+        '<p>' + (g.event_date ? esc(fmtLong(sast(g.event_date, '12:00'))) + ', ' : '') + 'R' + g.price + ' per photo' + (g.bundle ? ', R' + g.bundle + ' for all of yours' : '') + '</p></div>' +
+        '<div id="mybar"></div><details class="findbox"><summary>Already requested or paid? Find your order</summary><form id="find" novalidate><label class="f" for="fo-phone">Your WhatsApp number<input type="tel" id="fo-phone" autocomplete="tel" placeholder="e.g. 082 123 4567"></label><label class="f" for="fo-code">Order code<input type="text" id="fo-code" autocomplete="off" placeholder="e.g. SR-4ND2ZX"></label><button class="btn" type="submit">Find order</button></form><p class="err" id="fo-err" role="alert"></p><p class="hint">The code is in the WhatsApp message from your photographer.</p></details>' +
         (d.photos.length ? '<p class="hint" style="margin-bottom:12px">Find yourself, tap the circle on each photo you want, then press Request. Previews carry a watermark; the photos you pay for are clean.</p><div class="pgrid" id="pgrid">' +
           d.photos.map(function (p, i) { return '<div class="ph" data-pid="' + esc(p.id) + '"><button type="button" class="open" data-view="' + i + '" aria-label="View photo ' + p.seq + '"><img loading="lazy" src="' + esc(api.previewUrl(p.path)) + '" alt="Photo ' + p.seq + '"></button><span class="n">#' + p.seq + '</span><button type="button" class="pick" data-pick="' + esc(p.id) + '" aria-pressed="false" aria-label="Select photo ' + p.seq + '">+</button></div>'; }).join('') + '</div>' +
           '<div class="cart" id="cart"><div><b id="cart-n"></b><span id="cart-t"></span></div><button type="button" class="btn hot" id="cart-go">Request photos</button></div>'
           : '<div class="empty">The photographer has not uploaded photos yet. Keep this page and check again later' + (normPhone(ph.phone) ? ', or <a target="_blank" rel="noopener" href="' + esc(waLink(ph.phone, 'Hi, I was photographed at ' + g.title + '. Are the photos up yet? Gallery ' + g.code)) + '">message them on WhatsApp</a>' : '') + '.</div>');
-      sync();
+      sync(); loadMine();
     }, function (e) { main.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+    // Orders made on this phone: show a way back to them and mark their photos so nobody pays twice.
+    function loadMine() {
+      var list = myOrders().filter(function (x) { return !x.g || x.g === data.gallery.code; }).slice(0, 6);
+      if (!list.length) return;
+      Promise.all(list.map(function (x) { return api.getOrder(x.code).then(function (o) { return o; }, function () { return null; }); })).then(function (orders) {
+        if (currentRoute().name !== 'gallery-client' || !data) return;
+        orders = orders.filter(function (o) { return o && o.gallery.code === data.gallery.code; });
+        if (!orders.length) return;
+        var bar = $('#mybar'); if (!bar) return;
+        bar.innerHTML = '<div class="mybar"><strong>Your orders on this phone:</strong>' + orders.map(function (o) { return '<a class="btn sm ' + (o.status === 'requested' ? 'line' : 'hot') + '" href="#/o/' + esc(o.code) + '">' + esc(o.code) + ', ' + (o.status === 'requested' ? 'waiting for payment' : 'download') + '</a>'; }).join('') + '</div>';
+        orders.forEach(function (o) {
+          o.photos.forEach(function (p) {
+            var el = $('.ph[data-pid="' + p.id + '"]', main), b = el && $('.pick', el); if (!b) return;
+            var tag = document.createElement('span'); tag.className = 'bought'; tag.textContent = o.status === 'requested' ? 'Requested' : 'Bought'; b.replaceWith(tag);
+            var i = picked.indexOf(p.id); if (i !== -1) picked.splice(i, 1);
+          });
+        });
+        sync();
+      });
+    }
     function sync() {
       if (!data || !data.photos.length) return;
-      $$('.ph', main).forEach(function (el) { var on = picked.indexOf(el.dataset.pid) !== -1; el.classList.toggle('on', on); var b = $('.pick', el); b.setAttribute('aria-pressed', on); b.textContent = on ? '✓' : '+'; });
+      $$('.ph', main).forEach(function (el) { var on = picked.indexOf(el.dataset.pid) !== -1; el.classList.toggle('on', on); var b = $('.pick', el); if (!b) return; b.setAttribute('aria-pressed', on); b.textContent = on ? '\u2713' : '+'; });
       var n = picked.length;
-      $('#cart-n').textContent = n ? n + ' photo' + (n === 1 ? '' : 's') + ' · ' + money(total(n, data.gallery.price, data.gallery.bundle)) : 'No photos selected';
+      $('#cart-n').textContent = n ? n + ' photo' + (n === 1 ? '' : 's') + ', ' + money(total(n, data.gallery.price, data.gallery.bundle)) : 'No photos selected';
       $('#cart-t').textContent = n ? 'You pay the photographer directly' : 'Tap the circle on a photo to select it';
       $('#cart-go').disabled = !n;
       lsSet('pick.' + code, picked);
       if (!lightbox.hidden) paintLightbox();
     }
-    function toggle(pid) { var i = picked.indexOf(pid); if (i === -1) { if (picked.length >= 60) { toast('You can request up to 60 photos at once.'); return; } picked.push(pid); } else picked.splice(i, 1); sync(); }
+    function taken(pid) { var el = $('.ph[data-pid="' + pid + '"]', main); return el && !$('.pick', el); }
+    function toggle(pid) { if (taken(pid)) { toast('You already requested this photo.'); return; } var i = picked.indexOf(pid); if (i === -1) { if (picked.length >= 60) { toast('You can request up to 60 photos at once.'); return; } picked.push(pid); } else picked.splice(i, 1); sync(); }
     var at = 0;
     function paintLightbox() {
-      var p = data.photos[at], on = picked.indexOf(p.id) !== -1;
+      var p = data.photos[at], on = picked.indexOf(p.id) !== -1, got = taken(p.id);
       lightbox.innerHTML = '<div class="stage"><img src="' + esc(api.previewUrl(p.path)) + '" alt="Photo ' + p.seq + '"></div><div class="bar"><button type="button" class="btn sm line" data-lb="prev"' + (at === 0 ? ' disabled' : '') + '>Back</button><span class="mono">#' + p.seq + '</span>' +
-        '<button type="button" class="btn sm ' + (on ? 'line' : 'hot') + '" data-lb="pick">' + (on ? 'Selected ✓' : 'Select') + '</button><button type="button" class="btn sm line" data-lb="next"' + (at === data.photos.length - 1 ? ' disabled' : '') + '>Next</button><button type="button" class="btn sm line" data-lb="close">Close</button></div>';
+        (got ? '<span class="pill good">Already yours</span>' : '<button type="button" class="btn sm ' + (on ? 'line' : 'hot') + '" data-lb="pick">' + (on ? 'Selected \u2713' : 'Select') + '</button>') + '<button type="button" class="btn sm line" data-lb="next"' + (at === data.photos.length - 1 ? ' disabled' : '') + '>Next</button><button type="button" class="btn sm line" data-lb="close">Close</button></div>';
     }
     lightbox.onclick = function (e) {
       var b = e.target.closest('[data-lb]'); if (!b) { if (e.target === lightbox || e.target.classList.contains('stage')) lightbox.hidden = true; return; }
@@ -566,9 +629,26 @@
       else if (t.id === 'cart-go') openRequest();
     };
     main.onchange = null;
+    // Swipe left or right, or use the arrow keys, to move between photos.
+    function step(d) { var n = at + d; if (!data || n < 0 || n >= data.photos.length) return; at = n; paintLightbox(); }
+    state.lbStep = step;
+    state.lbKey = function (k) { if (k === 'ArrowRight') step(1); else if (k === 'ArrowLeft') step(-1); };
+    main.onsubmit = function (e) {
+      if (e.target.id !== 'find') return;
+      e.preventDefault();
+      var phone = normPhone($('#fo-phone').value), oc = $('#fo-code').value.trim(), errEl = $('#fo-err'), btn = $('#find button');
+      var err = !phone ? 'Enter the WhatsApp number you used, for example 082 123 4567.' : oc.length < 6 ? 'Enter your order code, for example SR-4ND2ZX.' : '';
+      errEl.textContent = err; if (err) return;
+      busy(btn, true, 'Looking...');
+      api.findOrder(oc, phone).then(function (found) {
+        busy(btn, false);
+        if (!found) { errEl.textContent = 'No order matches that number and code. Check the code in your photographer\'s WhatsApp message.'; return; }
+        rememberOrder(found, data ? data.gallery.code : ''); location.hash = '#/o/' + found;
+      }, function (er) { busy(btn, false); errEl.textContent = er.message; });
+    };
     function openRequest() {
       var g = data.gallery, n = picked.length, saved = lsGet('client', {});
-      showDialog('<div class="dh"><div><h2 id="dlg-title">Request ' + n + ' photo' + (n === 1 ? '' : 's') + '</h2><p>' + esc(money(total(n, g.price, g.bundle)) + ' · paid directly to the photographer') + '</p></div><button class="dx" type="button" data-close>Close</button></div>' +
+      showDialog('<div class="dh"><div><h2 id="dlg-title">Request ' + n + ' photo' + (n === 1 ? '' : 's') + '</h2><p>' + esc(money(total(n, g.price, g.bundle)) + ', paid directly to the photographer') + '</p></div><button class="dx" type="button" data-close>Close</button></div>' +
         '<form class="db" id="req" novalidate><label class="f" for="r-name">Your name<input type="text" id="r-name" autocomplete="name" maxlength="80" value="' + esc(saved.name || '') + '"></label>' +
         '<label class="f" for="r-phone">Your WhatsApp number<input type="tel" id="r-phone" autocomplete="tel" placeholder="e.g. 082 123 4567" value="' + esc(saved.phone || '') + '"></label>' +
         (g.kids ? '<label class="f" for="r-guard">Parent or guardian\'s full name<input type="text" id="r-guard" maxlength="80"></label>' : '') +
@@ -584,10 +664,13 @@
         var btn = $('button[type="submit"]', dlg); busy(btn, true, 'Sending...');
         lsSet('client', { name: name, phone: $('#r-phone', dlg).value.trim() });
         api.createOrder({ code: g.code, name: name, phone: phone, photoIds: picked.slice(), consent: true, portfolio: $('#r-port', dlg).checked, offers: $('#r-offers', dlg).checked, guardian: guard })
-          .then(function (oc) { lsSet('pick.' + code, []); var mine = lsGet('orders', []); mine.unshift(oc); lsSet('orders', mine.slice(0, 20)); closeDialog(); location.hash = '#/o/' + oc; }, function (er) { busy(btn, false); $('#r-err', dlg).textContent = er.message; });
+          .then(function (oc) { lsSet('pick.' + code, []); rememberOrder(oc, g.code); closeDialog(); location.hash = '#/o/' + oc; }, function (er) { busy(btn, false); $('#r-err', dlg).textContent = er.message; });
       });
     }
   }
+
+  function myOrders() { return lsGet('orders', []).map(function (x) { return typeof x === 'string' ? { code: x, g: '' } : x; }).filter(function (x) { return x && x.code; }); }
+  function rememberOrder(code, g) { var list = myOrders().filter(function (x) { return x.code !== code; }); list.unshift({ code: code, g: g }); lsSet('orders', list.slice(0, 20)); }
 
   /* ---------- client: order ---------- */
   function viewClientOrder(code) {
@@ -598,8 +681,8 @@
         if (!o) { main.innerHTML = '<div class="empty">We could not find order ' + esc(code) + '.</div>'; return; }
         var ph = o.photographer, paid = o.status !== 'requested', seqs = o.photos.map(function (p) { return '#' + p.seq; });
         var msg = 'Hi ' + firstName(ph.name) + ", it's " + o.client_name + '. I requested ' + o.photos.length + ' photo' + (o.photos.length === 1 ? '' : 's') + ' from ' + o.gallery.title + ' (' + seqs.join(', ') + '). My order code is ' + o.code + ' and the total is R' + o.amount + '. ' + (paid ? 'Thank you!' : 'How would you like me to pay?');
-        document.title = 'Order ' + o.code + ' · ShootRadar';
-        main.innerHTML = '<div class="ghead"><p class="kicker" style="color:inherit;opacity:.75">Order ' + esc(o.code) + '</p><h1>' + (paid ? 'Your photos are ready' : 'Request sent') + '</h1><p>' + esc(o.gallery.title + ' · ' + o.photos.length + ' photo' + (o.photos.length === 1 ? '' : 's') + ' · ' + money(o.amount)) + '</p></div>' +
+        document.title = 'Order ' + o.code + ', ShootRadar';
+        main.innerHTML = '<div class="ghead"><p class="kicker" style="color:inherit;opacity:.75">Order ' + esc(o.code) + '</p><h1>' + (paid ? 'Your photos are ready' : 'Request sent') + '</h1><p>' + esc(o.gallery.title + ', ' + o.photos.length + ' photo' + (o.photos.length === 1 ? '' : 's') + ', ' + money(o.amount)) + '</p></div>' +
           '<div class="cols"><div class="panel"><h2>What happens next</h2><ol class="steps">' +
             '<li class="done"><div><b>Request sent</b><span>' + esc(ph.brand || ph.name || 'The photographer') + ' can see your photos and number.</span></div></li>' +
             '<li class="' + (paid ? 'done' : 'now') + '"><div><b>Pay ' + esc(money(o.amount)) + '</b><span>Use reference ' + esc(o.code) + '. You pay the photographer directly.</span></div></li>' +
@@ -609,12 +692,17 @@
               '<button type="button" class="btn line" id="again">Check again</button></div><p class="hint">Keep this page: save the link or screenshot your order code. ' + (normPhone(ph.phone) ? 'Photographer: ' + esc(prettyPhone(ph.phone)) + '.' : '') + '</p>') +
             '<div class="row"><a class="btn sm line" href="#/g/' + esc(o.gallery.code) + '">Back to the gallery</a><button type="button" class="btn sm line" id="copy-order">Copy order link</button></div></div>' +
           '<div class="panel"><h2>' + (paid ? 'Download your photos' : 'Your selection') + '</h2>' +
-            (paid ? (o.downloads.length ? '<div class="thumbs">' + o.photos.map(function (p) { var d = o.downloads.filter(function (x) { return x.seq === p.seq; })[0]; return '<div class="thumb"><img loading="lazy" src="' + esc(api.previewUrl(p.path)) + '" alt="Photo ' + p.seq + '"><span class="n">#' + p.seq + '</span>' + (d ? '<a class="x" style="text-decoration:none;top:auto;bottom:4px" href="' + esc(d.url) + '" target="_blank" rel="noopener" download="photo-' + p.seq + '.jpg">Download</a>' : '') + '</div>'; }).join('') + '</div><p class="hint">Tap Download, then save the photo. The links work for 14 days. The photos are for your personal use.</p>' : '<div class="empty">The download links have expired. Ask the photographer to mark the order as paid again.</div>')
+            (paid ? (o.downloads.length ? '<div class="thumbs">' + o.photos.map(function (p) { var d = o.downloads.filter(function (x) { return x.seq === p.seq; })[0]; return '<div class="thumb"><img loading="lazy" src="' + esc(api.previewUrl(p.path)) + '" alt="Photo ' + p.seq + '"><span class="n">#' + p.seq + '</span>' + (d ? '<a class="x dl" style="text-decoration:none;top:auto;bottom:4px" href="' + esc(d.url) + '" download="' + esc(d.name || 'photo-' + p.seq + '.jpg') + '">Download</a>' : '') + '</div>'; }).join('') + '</div><div class="row"><button type="button" class="btn hot" id="dl-all">Download all ' + o.downloads.length + '</button></div><p class="hint">Photos save to your Downloads folder. If your phone asks to allow several downloads, say yes. The links work for 14 days and the photos are for your personal use.</p>' : '<div class="empty">The download links have expired. Ask the photographer to mark the order as paid again.</div>')
               : '<div class="thumbs">' + o.photos.map(function (p) { return '<div class="thumb"><img loading="lazy" src="' + esc(api.previewUrl(p.path)) + '" alt="Photo ' + p.seq + '"><span class="n">#' + p.seq + '</span></div>'; }).join('') + '</div>') + '</div></div>';
         var again = $('#again'); if (again) again.addEventListener('click', function () { busy(again, true, 'Checking...'); load(false).then(function () { if (!quiet) toast('Checked just now.'); }); });
+        var all = $('#dl-all'); if (all) all.addEventListener('click', function () {
+          var links = $$('a.dl', main); all.disabled = true;
+          links.forEach(function (a, i) { setTimeout(function () { a.click(); if (i === links.length - 1) { all.disabled = false; toast('Downloads started.'); } }, i * 900); });
+        });
+        rememberOrder(o.code, o.gallery.code);
         $('#copy-order').addEventListener('click', function () { copy(orderUrl(o.code), 'Order link copied.'); });
         clearTimeout(state.timer);
-        if (!paid) state.timer = setTimeout(function () { if (currentRoute().name === 'order' && !dlg.open) load(true); }, 25000);
+        if (!paid) state.timer = setTimeout(function () { if (currentRoute().name === 'order' && !dlg.open) load(true); }, 10000);
       }, function (e) { if (!quiet) main.innerHTML = '<div class="empty">' + esc(e.message) + ' <a href="' + esc(orderUrl(code)) + '">Try again</a></div>'; });
     }
     main.onclick = null; main.onchange = null;
@@ -634,7 +722,7 @@
   function route() {
     var r = currentRoute(), client = r.name === 'gallery-client' || r.name === 'order';
     clearTimeout(state.timer); lightbox.hidden = true; if (dlg.open) closeDialog();
-    main.onclick = null; main.onchange = null;
+    main.onclick = null; main.onchange = null; main.onsubmit = null; state.lbKey = null; state.lbStep = null;
     document.body.classList.toggle('client', client);
     document.title = 'ShootRadar';
     $$('#nav a').forEach(function (a) { var on = a.dataset.nav === (r.name === 'gallery-admin' ? 'galleries' : r.name); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
@@ -650,20 +738,33 @@
   /* ---------- global listeners ---------- */
   document.addEventListener('click', function (e) {
     var t = e.target.closest('button, a'); if (!t) return;
-    if (t.dataset.city) { state.city = t.dataset.city; lsSet('city', state.city); renderEventList(); var again = $('#chips [aria-pressed="true"]'); if (again) again.focus(); }
+    if (t.dataset.city) { state.city = t.dataset.city; state.limit = 0; lsSet('city', state.city); renderEventList(); var again = $('#chips [aria-pressed="true"]'); if (again) again.focus(); }
     else if (t.dataset.open) openEvent(t.dataset.open);
     else if (t.id === 'add-event') openAdd();
+    else if (t.id === 'more') { state.limit += pageSize(); renderEventList(); }
+    else if (t.id === 'f-toggle') { var fr = $('#frow'); if (fr) fr.classList.add('open'); }
+    else if (t.hasAttribute('data-sheet-close')) { var fr2 = $('#frow'); if (fr2) fr2.classList.remove('open'); }
+    else if (t.id === 'theme') cycleTheme();
+    else if (t.classList.contains('js-install')) { if (installEvt) { installEvt.prompt(); installEvt = null; $$('.js-install').forEach(function (b) { b.hidden = true; }); } }
     else if (t.id === 'retry') loadEvents(true).then(renderEventList);
     else if (t.dataset.newgal) openNewGallery(t.dataset.newgal);
     else if (t.dataset.delevent) { if (t.dataset.sure) api.deleteEvent(t.dataset.delevent).then(function () { closeDialog(); toast('Event deleted.'); return loadEvents(true); }).then(renderEventList, function (er) { toast(er.message); }); else { t.dataset.sure = '1'; t.textContent = 'Tap again to delete'; } }
   });
-  document.addEventListener('input', function (e) { if (e.target.id === 'f-q') { state.q = e.target.value.trim(); renderEventList(); } });
+  document.addEventListener('input', function (e) { if (e.target.id === 'f-q') { state.q = e.target.value.trim(); state.limit = 0; renderEventList(); } });
   document.addEventListener('change', function (e) {
     var id = e.target.id;
     if (id === 'f-cat') state.cat = e.target.value; else if (id === 'f-when') state.when = e.target.value; else if (id === 'f-sort') state.sort = e.target.value; else return;
-    renderEventList();
+    state.limit = 0; renderEventList();
   });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !lightbox.hidden) lightbox.hidden = true; });
+  document.addEventListener('keydown', function (e) { if (lightbox.hidden) return; if (e.key === 'Escape') lightbox.hidden = true; else if (state.lbKey) state.lbKey(e.key); });
+  var sx = 0, sy = 0;
+  lightbox.addEventListener('touchstart', function (e) { var t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY; }, { passive: true });
+  lightbox.addEventListener('touchend', function (e) { var t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy; if (state.lbStep && Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) state.lbStep(dx < 0 ? 1 : -1); }, { passive: true });
+  var installEvt = null;
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEvt = e; $$('.js-install').forEach(function (b) { b.hidden = false; }); });
+  var THEMES = ['system', 'light', 'dark'];
+  function paintTheme() { var t = lsGet('theme', 'system'), b = document.getElementById('theme'); if (THEMES.indexOf(t) === -1) t = 'system'; if (t === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', t); if (b) b.innerHTML = '<span class="tl">Theme: </span>' + t; }
+  function cycleTheme() { var t = lsGet('theme', 'system'); lsSet('theme', THEMES[(THEMES.indexOf(t) + 1) % 3] || 'system'); paintTheme(); }
   window.addEventListener('hashchange', route);
 
   /* ---------- start ---------- */
@@ -674,6 +775,8 @@
     $('#foot-help').href = waLink(cfg.supportWhatsApp, 'Hi, I have a problem with ShootRadar: ');
     if (api.mode === 'demo') { var flag = document.createElement('div'); flag.className = 'demo-flag'; flag.textContent = 'Demo mode: nothing is saved and everything resets when you reload.'; document.body.insertBefore(flag, document.getElementById('top')); }
     if (CITIES.indexOf(state.city) === -1) state.city = 'All';
+    paintTheme();
+    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(function () { });
     api.init(function () { afterAuth().then(route); }).then(afterAuth).then(route, route);
     loadEvents();
   })();
