@@ -92,6 +92,34 @@ def clock(d):
     return d.astimezone(SAST).strftime('%H:%M')
 
 
+# ---------------- Estimated ratings for feed events ----------------
+# Feeds do not publish dress code, attendance or who is attending, so these are estimates from what a listing does contain.
+LOW_VALUE = re.compile(r"\b(workshops?|courses?|class(es)?|masterclass(es)?|webinars?|training|tastings?|seminars?|bootcamps?|retreats?|yoga|pilates|"
+                       r"meditation|lessons?|coaching|paint and sip|sip and paint|pottery|hikes?|quiz|bingo|book club|support group|"
+                       r"(guided|walking|wine|sightseeing|city|township|food|boat|bus|day|game|safari)\s+(tours?|drives?))\b", re.I)
+GLAM_HIGH = re.compile(r"\b(gala|awards?|ball|black tie|fashion|pageant|matric|prom|bridal|wedding|graduat\w*|red carpet|polo|derby day|durban july)\b", re.I)
+GLAM_MID = re.compile(r"\b(festival|fest|party|carnival|rave|soiree|picnic|brunch|rooftop|all white|costume|halloween|new year|nye|pride)\b", re.I)
+CROWD_MID = re.compile(r"\b(festival|fest|expo|fair|market|carnival|marathon|race|run|tournament|cup|championship|derby|parade|convention)\b", re.I)
+
+
+def spend_from_price(price):
+    if price is None:
+        return 2
+    return 1 if price <= 0 else 2 if price < 100 else 3 if price < 250 else 4 if price < 500 else 5
+
+
+def size_from(n):
+    return 'small' if n < 1000 else 'medium' if n < 5000 else 'large' if n < 20000 else 'huge'
+
+
+def estimate(name, cat, venue, price, tags=''):
+    text = name + ' ' + tags
+    glam = 5 if cat == 'glam' else 4 if (GLAM_HIGH.search(text) or cat == 'graduation') else 3 if (GLAM_MID.search(text) or cat in ('concert', 'festival', 'arts')) else 2
+    cap = capacity(venue)
+    size = size_from(cap) if cap else ('medium' if (CROWD_MID.search(text) or cat == 'festival') else 'small')
+    return {'glam': glam, 'celebs': 1 if cat in ('concert', 'festival') else 0, 'spend': spend_from_price(price)}, size
+
+
 # ---------------- Ticketmaster ----------------
 def from_ticketmaster(key):
     out, seen = [], set()
@@ -159,6 +187,9 @@ def map_ticketmaster(e):
         price = 'R{:,.0f}'.format(lo) + ('–R{:,.0f}'.format(hi) if hi and hi != lo else '')
     promoter = (e.get('promoter') or {}).get('name') or ''
     big = cat in ('concert', 'sport')
+    f, _ = estimate(name, cat, vname, prices[0].get('min') if prices else None, segment + ' ' + genre)
+    f['celebs'] = {'concert': 4 if (cap or 0) >= 20000 else 3, 'sport': 2, 'arts': 1}.get(cat, 1)
+    f['spend'] = max(f['spend'], 3)
     return {
         'id': 'tm-' + str(e.get('id')), 'name': name[:140], 'cat': cat, 'city': city, 'venue': vname, 'area': vcity,
         'address': ', '.join(p for p in [line1, vcity] if p), 'starts_at': start, 'ends_at': end, 'end_est': end_est,
@@ -172,8 +203,7 @@ def map_ticketmaster(e):
         'access_note': ('Large venues usually ban professional cameras without the promoter\'s accreditation. Arrivals outside the venue are open.'
                         if big else 'Ticketed event; ask the venue before photographing inside.'),
         'tags': [t for t in [segment, genre] if t and t != 'Undefined'][:3],
-        'f': {'concert': {'glam': 3, 'celebs': 3, 'spend': 4}, 'sport': {'glam': 2, 'celebs': 2, 'spend': 3},
-              'arts': {'glam': 3, 'celebs': 1, 'spend': 4}}.get(cat, {'glam': 2, 'celebs': 1, 'spend': 3}),
+        'f': f,
         'outdoor': False, 'minors': False,
         'tips': 'Listed automatically from Ticketmaster. Check the camera rules, then plan to shoot arrivals and queues.',
         'origin': 'ticketmaster',
@@ -203,7 +233,7 @@ def from_quicket(key):
     return out[:150], raw_seen, shape
 
 
-QUICKET_CATS = [('graduat', 'graduation'), ('music', 'concert'), ('concert', 'concert'), ('festival', 'festival'), ('party', 'festival'), ('nightlife', 'festival'),
+QUICKET_CATS = [('graduat', 'graduation'), ('gala', 'glam'), ('award', 'glam'), ('pageant', 'glam'), ('fashion', 'glam'), ('music', 'concert'), ('concert', 'concert'), ('festival', 'festival'), ('party', 'festival'), ('nightlife', 'festival'),
                 ('sport', 'sport'), ('fitness', 'sport'), ('business', 'business'), ('conference', 'business'), ('expo', 'business'),
                 ('tech', 'business'), ('fashion', 'glam'), ('award', 'glam'), ('gala', 'glam'), ('arts', 'arts'), ('theatre', 'arts'),
                 ('comedy', 'arts'), ('film', 'arts'), ('family', 'festive'), ('kids', 'festive'), ('christmas', 'festive')]
@@ -214,6 +244,9 @@ def map_quicket(e):
         return None
     name = (e.get('name') or '').strip()
     if len(name) < 3:
+        return None
+    cat_names = ' '.join(str((c or {}).get('name') or '') for c in (e.get('categories') or []) if isinstance(c, dict))
+    if LOW_VALUE.search(name) or LOW_VALUE.search(cat_names):
         return None
     start, end = parse_dt(e.get('startDate')), parse_dt(e.get('endDate'))
     if not start or start > NOW + timedelta(days=HORIZON_DAYS):
@@ -245,6 +278,9 @@ def map_quicket(e):
     if str(org.get('pageUrl') or '').startswith('http'):
         organiser['website'] = org['pageUrl']
     prices = [t.get('price') for t in (e.get('tickets') or []) if isinstance(t, dict) and isinstance(t.get('price'), (int, float))]
+    paid = [p for p in prices if p > 0]
+    low = min(paid) if paid else (0 if prices else None)
+    f, size = estimate(name, cat, vname, low, cat_names)
     price = 'Free' if prices and max(prices) == 0 else ('From R{:,.0f}'.format(min(p for p in prices if p > 0)) if any(p > 0 for p in prices) else 'See Quicket')
     days = max(1, (end.astimezone(SAST).date() - start.astimezone(SAST).date()).days + (0 if clock(end) == '00:00' else 1))
     days = 1 if (end - start) <= timedelta(hours=20) else days
@@ -254,12 +290,13 @@ def map_quicket(e):
         'area': str(loc.get('levelThree') or ''), 'address': addr or city, 'starts_at': start, 'ends_at': end, 'end_est': end_est,
         'days': days, 'daily': ('From ' + clock(start) + ' daily') if days > 1 else None, 'doors': None,
         'show': None if days > 1 else 'Starts ' + clock(start), 'time_note': None,
-        'crowd': {'basis': 'estimate', 'size': 'small', 'note': 'Quicket listing; no attendance figure published'},
+        'crowd': {'basis': 'estimate', 'size': size, 'note': 'Estimated from the type of event; Quicket publishes no attendance figure'},
         'ticket': {'seller': 'Quicket', 'url': url, 'price': price}, 'source': {'name': 'Quicket', 'url': url or 'https://www.quicket.co.za'},
-        'organiser': organiser, 'status': 'free' if price == 'Free' else 'on-sale', 'access': 'ticket',
-        'access_note': 'Smaller organiser-run event: message the organiser, they often welcome a photographer.',
+        'organiser': organiser, 'status': 'free' if price == 'Free' else 'on-sale', 'access': 'open' if price == 'Free' else 'ticket',
+        'access_note': ('Free event: no ticket needed, but ask the organiser before selling photos on site.' if price == 'Free'
+                        else 'Organiser-run event: message the organiser, they often welcome a photographer.'),
         'tags': [str((c or {}).get('name')) for c in (e.get('categories') or []) if isinstance(c, dict) and c.get('name')][:3],
-        'f': {'glam': 2, 'celebs': 0, 'spend': 2}, 'outdoor': False, 'minors': cat in ('festive', 'graduation'),
+        'f': f, 'outdoor': False, 'minors': cat in ('festive', 'graduation'),
         'tips': 'Listed automatically from Quicket. Contact the organiser first and offer guests a QR gallery.',
         'origin': 'quicket',
     }

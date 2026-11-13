@@ -18,7 +18,7 @@
   var STATUS = { 'on-sale': ['On sale', 'good'], tbc: ['Details TBC', 'warn'], verify: ['Verify first', 'warn'], free: ['Free entry', 'good'], user: ['Added by a photographer', 'hot'], submitted: ['Unverified', 'warn'] };
 
   var main = document.getElementById('main'), dlg = document.getElementById('dlg'), lightbox = document.getElementById('lightbox');
-  var state = { events: null, eventsError: '', profile: null, city: lsGet('city', 'All'), when: 'all', cat: 'all', sort: 'soonest', q: '', timer: null, limit: 0, lbKey: null };
+  var state = { events: null, eventsError: '', profile: null, city: lsGet('city', 'All'), when: 'all', cat: 'all', sort: 'soonest', q: '', timer: null, limit: 0, lbKey: null, worth: false };
   function pageSize() { try { return window.matchMedia('(max-width: 640px)').matches ? 8 : 12; } catch (e) { return 12; } }
   function pad3(n) { return ('00' + n).slice(-3); }
   function slug(t) { return String(t || '').normalize('NFKD').replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).filter(Boolean).map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join('').slice(0, 30); }
@@ -129,6 +129,7 @@
     if (ev.origin !== 'research' && e - s > 10 * 864e5) return false;
     if (!ignoreCity && state.city !== 'All' && ev.city !== state.city) return false;
     if (state.cat !== 'all' && ev.cat !== state.cat) return false;
+    if (state.worth && score(ev) < 50) return false;
     if (state.when === 'week' && s > now + 7 * 864e5) return false;
     if (state.when === 'month' && s > now + 30 * 864e5) return false;
     if (state.when === 'weekend') { var w = weekend(); if (!(s < w[1] && e >= w[0])) return false; }
@@ -201,7 +202,7 @@
       '<div class="head"><div><p class="kicker">South Africa, 5 cities</p><h1>Events worth shooting</h1><p>Pick a city, open an event for times, crowd, camera rules and the organiser\'s contact details.</p></div>' +
       '<button class="btn line" type="button" id="add-event">Add an event or graduation</button></div>' +
       '<div class="filters"><div class="chips" id="chips" role="group" aria-label="City"></div>' +
-      '<div class="row"><button type="button" class="btn sm line f-toggle" id="f-toggle">Filters</button></div>' +
+      '<div class="row"><button type="button" class="btn sm line f-toggle" id="f-toggle">Filters</button><button type="button" class="chip" id="worth" aria-pressed="' + state.worth + '">Worth the trip <i>score 50+</i></button></div>' +
       '<div class="frow" id="frow"><div class="sheet-head"><span>Filters</span><button type="button" class="btn sm line" data-sheet-close>Close</button></div>' +
         '<label class="f" for="f-cat">Type<select id="f-cat"><option value="all">All types</option>' + Object.keys(CATS).map(function (k) { return '<option value="' + k + '">' + CATS[k] + '</option>'; }).join('') + '</select></label>' +
         '<label class="f" for="f-when">When<select id="f-when"><option value="all">All upcoming</option><option value="weekend">This weekend</option><option value="week">Next 7 days</option><option value="month">Next 30 days</option></select></label>' +
@@ -263,7 +264,7 @@
           (normPhone(o.phone) && /^27[678]/.test(normPhone(o.phone)) ? '<a class="btn sm line" id="pitch-wa" target="_blank" rel="noopener" href="#">WhatsApp organiser</a>' : '') + '</div>' +
           (!p.name ? '<p class="hint" id="pitch-hint" style="margin-top:6px">' + (api.user() ? 'Fill in your <a href="#/profile" data-close>profile</a>' : '<a href="#/profile" data-close>Sign in</a> and fill in your profile') + ' and your name, studio and number appear here.</p>' : '') + '</div>' +
         (ev.tips ? '<div class="sect"><h3>Shoot plan</h3><p>' + esc(ev.tips) + '</p><div class="row" style="margin-top:8px">' + (ev.tags || []).map(function (x) { return '<span class="pill">' + esc(x) + '</span>'; }).join('') + '</div></div>' : '') +
-        '<div class="sect"><h3>Why it scores ' + sc + '</h3><div class="bars">' + barRow('Crowd size', SIZE[sizeOf(ev)].f) + barRow('Access', acc(ev).f) + barRow('Glam', f.glam == null ? 2 : f.glam) + barRow('Celebrities', f.celebs == null ? 1 : f.celebs) + barRow('Spending power', f.spend == null ? 3 : f.spend) + '</div></div>' +
+        '<div class="sect"><h3>Why it scores ' + sc + '</h3>' + (ev.origin === 'quicket' || ev.origin === 'ticketmaster' ? '<p class="hint" style="margin-bottom:8px">Estimated from the listing: ticket price, type of event and venue. Nobody has checked this event by hand.</p>' : '') + '<div class="bars">' + barRow('Crowd size', SIZE[sizeOf(ev)].f) + barRow('Access', acc(ev).f) + barRow('Glam', f.glam == null ? 2 : f.glam) + barRow('Celebrities', f.celebs == null ? 1 : f.celebs) + barRow('Spending power', f.spend == null ? 3 : f.spend) + '</div></div>' +
         '<div class="sect"><h3>Is it worth going?</h3><div class="calc">' +
           '<label class="f" for="k-h">Hours shooting<input type="number" id="k-h" min="1" max="16" value="' + hrs + '"></label>' +
           '<label class="f" for="k-r">People approached per hour<input type="number" id="k-r" min="0" value="12"></label>' +
@@ -777,6 +778,7 @@
     if (t.dataset.city) { state.city = t.dataset.city; state.limit = 0; lsSet('city', state.city); renderEventList(); var again = $('#chips [aria-pressed="true"]'); if (again) again.focus(); }
     else if (t.dataset.open) openEvent(t.dataset.open);
     else if (t.id === 'add-event') openAdd();
+    else if (t.id === 'worth') { state.worth = !state.worth; state.limit = 0; t.setAttribute('aria-pressed', state.worth); renderEventList(); }
     else if (t.id === 'more') { state.limit += pageSize(); renderEventList(); }
     else if (t.id === 'f-toggle') { var fr = $('#frow'); if (fr) fr.classList.add('open'); }
     else if (t.hasAttribute('data-sheet-close')) { var fr2 = $('#frow'); if (fr2) fr2.classList.remove('open'); }
