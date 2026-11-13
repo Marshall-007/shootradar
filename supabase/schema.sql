@@ -388,3 +388,15 @@ create policy sr_originals_update on storage.objects for update to authenticated
 drop policy if exists sr_originals_admin on storage.objects;
 create policy sr_originals_admin on storage.objects for all to authenticated
   using (bucket_id = 'originals' and public.is_admin()) with check (bucket_id = 'originals' and public.is_admin());
+
+-- Admin console: how much photo storage each photographer is using, read from the stored files themselves.
+create or replace function public.storage_usage() returns json language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Admins only'; end if;
+  return (select coalesce(json_agg(json_build_object('id', t.u, 'bytes', t.b, 'files', t.n)), '[]'::json) from (
+    select split_part(o.name, '/', 1) as u, coalesce(sum((o.metadata->>'size')::bigint), 0) as b, count(*) as n
+    from storage.objects o where o.bucket_id in ('previews', 'originals') group by 1) t);
+end;
+$$;
+revoke all on function public.storage_usage() from public;
+grant execute on function public.storage_usage() to authenticated;

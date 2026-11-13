@@ -416,7 +416,7 @@
         '<li><div><b>Upload after the shoot</b><span>Clients see a numbered, watermarked preview. Your original file uploads untouched, at full quality.</span></div></li>' +
         '<li><div><b>Clients pick and pay</b><span>They scan, tick their photos and pay you with your own link, EFT or cash.</span></div></li>' +
         '<li><div><b>Mark as paid</b><span>The full-quality photos unlock on the client\'s page.</span></div></li></ol>' +
-        '<p class="hint">The pilot is free and shares 1 GB of storage between all photographers. To recycle that space, each full-size original is removed 7 days after you upload it; the preview stays, and you can upload an original again if a client pays late.</p></div></div>';
+        '<p class="hint">Each full-size original is removed 7 days after you upload it; the preview stays, and you can upload an original again if a client pays late.</p></div></div>';
     $('#signout').addEventListener('click', function () { try { history.replaceState(null, '', location.pathname + location.search + '#/'); } catch (er) { /* keep the address */ } api.signOut().then(function () { state.profile = null; if (!$('#code-form')) route(); }); });
     var rc = $('#recheck'); if (rc) rc.addEventListener('click', function () { busy(rc, true, 'Checking...'); afterAuth().then(function () { if (approved()) { toast('You are approved. Welcome.'); location.hash = '#/events'; } else toast('Not approved yet.'); route(); }); });
     $('#prof').addEventListener('submit', function (e) {
@@ -832,16 +832,24 @@
   }
   function viewAdmin() {
     main.innerHTML = '<div class="head"><div><p class="kicker">Admin</p><h1>Photographers</h1><p>New sign-ups wait here until you approve them. A suspended photographer cannot see events, upload or create galleries.</p></div><a class="btn line" href="#/sources">Data sources and refresh log</a></div>' +
-      '<div class="tiles" id="ad-tiles"></div><div class="stack" id="ad-list"><div class="empty">Loading...</div></div>';
+      '<div class="panel" id="ad-store" style="margin-bottom:14px"><h2>Storage</h2><p class="hint">Loading...</p></div><div class="tiles" id="ad-tiles"></div><div class="stack" id="ad-list"><div class="empty">Loading...</div></div>';
     function load() {
-      return api.listProfiles().then(function (list) {
+      return Promise.all([api.listProfiles(), api.storageUsage().then(null, function () { return null; })]).then(function (rs) {
+        var list = rs[0], use = rs[1], by = {}, used = 0, LIMIT = 1024 * 1048576;
         if (currentRoute().name !== 'admin') return;
+        function mb(n) { return n >= 1048576 * 100 ? Math.round(n / 1048576) + ' MB' : (n / 1048576).toFixed(1) + ' MB'; }
+        (use || []).forEach(function (u) { by[u.id] = u; used += u.bytes; });
+        var pct = Math.min(100, used / LIMIT * 100), top = (use || []).filter(function (u) { return u.bytes > 0; }).sort(function (a, b) { return b.bytes - a.bytes; });
+        $('#ad-store').innerHTML = '<h2>Storage</h2>' + (use ? '<p><b>' + mb(used) + '</b> of 1 GB used (' + (pct < 1 && used ? 'under 1' : Math.round(pct)) + '%), ' + mb(Math.max(0, LIMIT - used)) + ' free</p><div class="progress" role="img" aria-label="' + Math.round(pct) + ' percent of storage used"><i style="width:' + pct.toFixed(1) + '%' + (pct >= 80 ? ';background:var(--stop, #b3261e)' : '') + '"></i></div>' +
+          (top.length ? '<table class="srctable" style="margin-top:10px"><tbody>' + top.map(function (u) { var p = list.filter(function (x) { return x.id === u.id; })[0] || {}; return '<tr><td>' + esc(p.brand || p.name || p.email || 'Deleted account') + '</td><td class="mono">' + mb(u.bytes) + '</td><td class="mono">' + Math.round(u.bytes / LIMIT * 100) + '%</td><td class="hint">' + u.files + ' file' + (u.files === 1 ? '' : 's') + '</td></tr>'; }).join('') + '</tbody></table>' : '<p class="hint" style="margin-top:8px">Nothing stored yet.</p>') +
+          '<p class="hint" style="margin-top:8px">Photo files only (previews and originals), measured live. Supabase\'s own usage page can lag by up to an hour.</p>'
+          : '<p class="hint">Storage figures are not available yet. They appear once the database update has run.</p>');
         var waiting = list.filter(function (p) { return !p.approved && !p.is_admin; }), rest = list.filter(function (p) { return p.approved || p.is_admin; });
         $('#ad-tiles').innerHTML = '<div class="tile"><span>Waiting</span><b>' + waiting.length + '</b></div><div class="tile"><span>Approved</span><b>' + rest.length + '</b></div><div class="tile"><span>Accounts</span><b>' + list.length + '</b></div>';
         $('#ad-list').innerHTML = list.length ? waiting.concat(rest).map(function (p) {
           var on = p.approved || p.is_admin, hello = 'Hi ' + (firstName(p.name) || 'there') + ', your ShootRadar account is approved. Sign in here: ' + baseUrl();
           return '<div class="order" data-prof="' + esc(p.id) + '"><div class="order-top"><h4>' + esc(p.name || 'No name yet') + (p.brand ? ', ' + esc(p.brand) : '') + '</h4><span class="pill ' + (p.is_admin ? 'hot">Admin' : on ? 'good">Approved' : 'warn">Waiting for approval') + '</span></div>' +
-            '<p class="hint">' + esc([p.email, p.phone ? prettyPhone(p.phone) : 'no phone yet', p.city, p.created_at ? 'joined ' + shortDate(p.created_at) : ''].filter(Boolean).join(', ')) + '</p>' +
+            '<p class="hint">' + esc([p.email, p.phone ? prettyPhone(p.phone) : 'no phone yet', p.city, p.created_at ? 'joined ' + shortDate(p.created_at) : '', by[p.id] ? 'using ' + mb(by[p.id].bytes) : ''].filter(Boolean).join(', ')) + '</p>' +
             (p.is_admin ? '' : '<div class="row">' + (on ? '<button type="button" class="btn sm line danger" data-suspend="' + esc(p.id) + '">Suspend</button>' : '<button type="button" class="btn sm hot" data-approve="' + esc(p.id) + '">Approve</button>') +
               (on && normPhone(p.phone) ? '<a class="btn sm line" target="_blank" rel="noopener" href="' + esc(waLink(p.phone, hello)) + '">Send welcome message</a>' : '') + '</div>') + '</div>';
         }).join('') : '<div class="empty">No accounts yet.</div>';

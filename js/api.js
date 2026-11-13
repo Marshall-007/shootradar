@@ -72,6 +72,7 @@
       },
       listProfiles: function () { return sb.from('profiles').select('*').order('created_at', { ascending: false }).limit(500).then(function (r) { return ok(r, 'Could not load the photographers.'); }); },
       setApproved: function (id, approved) { return sb.from('profiles').update({ approved: approved }).eq('id', id).select().single().then(function (r) { return ok(r, 'Could not change the approval.'); }); },
+      storageUsage: function () { return sb.rpc('storage_usage').then(function (r) { return ok(r, 'Could not load storage figures.') || []; }); },
       listEvents: function () {
         return sb.from('events').select('*').gte('ends_at', new Date(Date.now() - 3 * 864e5).toISOString()).order('starts_at').limit(1500).then(function (r) { return ok(r, 'Could not load events.'); });
       },
@@ -219,6 +220,7 @@
       saveProfile: function (p) { return later(function () { return Object.assign(mine(), p); }); },
       listProfiles: function () { return later(function () { mine(); return Object.keys(db.profiles).map(function (k) { return db.profiles[k]; }).sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); }); }); },
       setApproved: function (pid, v) { return later(function () { db.profiles[pid].approved = v; return db.profiles[pid]; }); },
+      storageUsage: function () { return later(function () { var m = {}; db.photos.forEach(function (p) { var u = m[p.photographer_id] || (m[p.photographer_id] = { id: p.photographer_id, bytes: 0, files: 0 }); u.bytes += p.bytes || 0; u.files += p.full_deleted ? 1 : 2; }); m['demo-3'] = { id: 'demo-3', bytes: 212 * 1048576, files: 96 }; return Object.keys(m).map(function (k) { return m[k]; }); }); },
       listEvents: function () { return later(function () { return db.events.slice().sort(function (a, b) { return new Date(a.starts_at) - new Date(b.starts_at); }); }); },
       listRuns: function () { return later((window.SR_DEMO_RUNS || []).slice().reverse()); },
       addEvent: function (ev) { var row = Object.assign({ id: 'u-' + code(8).toLowerCase(), created_at: new Date().toISOString(), origin: 'user' }, ev, { created_by: need(), status: 'user' }); db.events.push(row); return later(row); },

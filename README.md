@@ -82,4 +82,5 @@ Edit `tools/events.json`, run `python3 tools/build_seed.py`, then paste the new 
 - New sign-ups are pending until an admin approves them on the Admin tab. The Data sources page and refresh log are admin-only.
 - Make the first admin once, in the Supabase SQL editor (replace the email):
   `update public.profiles set is_admin = true, approved = true where email = 'you@example.com';`
+- The Admin tab shows total photo storage against the 1 GB limit and how much each photographer uses.
 - Expired originals are removed when an approved photographer (their own) or an admin (everyone's) opens the app.
