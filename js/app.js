@@ -125,6 +125,8 @@
   function passes(ev, ignoreCity) {
     var now = Date.now(), s = S(ev).getTime(), e = E(ev).getTime();
     if (e < now) return false;
+    // Listings longer than 10 days from feeds or users are standing offers or have faulty dates. Researched events are checked by hand.
+    if (ev.origin !== 'research' && e - s > 10 * 864e5) return false;
     if (!ignoreCity && state.city !== 'All' && ev.city !== state.city) return false;
     if (state.cat !== 'all' && ev.cat !== state.cat) return false;
     if (state.when === 'week' && s > now + 7 * 864e5) return false;

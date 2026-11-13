@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SAST = timezone(timedelta(hours=2))
 NOW = datetime.now(timezone.utc)
 HORIZON_DAYS = 75
+MAX_EVENT_DAYS = 10  # longer listings are standing offers (tours, classes) or have faulty dates, so they are left out
 
 CITY_WORDS = {
     'Johannesburg': ['johannesburg', 'sandton', 'soweto', 'randburg', 'midrand', 'roodepoort', 'nasrec', 'rosebank',
@@ -135,6 +136,8 @@ def map_ticketmaster(e):
     end_est = not end or end <= start
     if end_est:
         end = start + timedelta(hours=3, minutes=30)
+    if (end - start) > timedelta(days=MAX_EVENT_DAYS):
+        return None
     venue = (((e.get('_embedded') or {}).get('venues')) or [{}])[0]
     vname = venue.get('name') or 'Venue to be confirmed'
     vcity = (venue.get('city') or {}).get('name') or ''
@@ -218,7 +221,7 @@ def map_quicket(e):
     end_est = not end or end <= start
     if end_est:
         end = start + timedelta(hours=4)
-    if end < NOW:
+    if end < NOW or (end - start) > timedelta(days=MAX_EVENT_DAYS):
         return None
     venue = e.get('venue') or {}
     loc = e.get('locality') or {}
