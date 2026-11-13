@@ -100,6 +100,77 @@ create table if not exists public.orders (
 );
 create index if not exists orders_gallery_idx on public.orders (gallery_id);
 
+-- Photographer approval: sign-ups start as pending until an admin approves them.
+alter table public.profiles add column if not exists approved boolean not null default false;
+alter table public.profiles add column if not exists is_admin boolean not null default false;
+alter table public.profiles add column if not exists email text;
+insert into public.profiles (id, email) select u.id, u.email from auth.users u
+on conflict (id) do update set email = excluded.email;
+
+create or replace function public.is_admin() returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.profiles where id = auth.uid() and is_admin);
+$$;
+create or replace function public.is_approved() returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.profiles where id = auth.uid() and (approved or is_admin));
+$$;
+
+-- Nobody can approve themselves or make themselves admin: only an admin, or the SQL editor, can change those two fields.
+create or replace function public.profiles_guard() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is not null and not public.is_admin() then
+    if tg_op = 'INSERT' then
+      new.approved := false; new.is_admin := false;
+    else
+      new.approved := old.approved; new.is_admin := old.is_admin; new.email := old.email;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists profiles_guard on public.profiles;
+create trigger profiles_guard before insert or update on public.profiles for each row execute function public.profiles_guard();
+
+-- Returns the signed-in photographer's profile, creating a pending one on first sign-in.
+create or replace function public.my_profile() returns public.profiles language plpgsql security definer set search_path = public as $$
+declare p public.profiles;
+begin
+  if auth.uid() is null then return null; end if;
+  insert into public.profiles (id, email) values (auth.uid(), (select email from auth.users where id = auth.uid()))
+  on conflict (id) do nothing;
+  select * into p from public.profiles where id = auth.uid();
+  return p;
+end;
+$$;
+revoke all on function public.my_profile() from public;
+grant execute on function public.my_profile() to authenticated;
+
+-- Private client galleries hang off an event gallery and have their own code.
+alter table public.galleries add column if not exists parent_id uuid references public.galleries(id) on delete cascade;
+alter table public.galleries add column if not exists private boolean not null default false;
+
+-- Originals are kept untouched and removed 7 days after upload to recycle the free storage.
+alter table public.photos add column if not exists expires_at timestamptz not null default (now() + interval '7 days');
+alter table public.photos add column if not exists full_deleted boolean not null default false;
+
+alter table public.orders drop constraint if exists orders_status;
+alter table public.orders add constraint orders_status check (status in ('requested', 'paid', 'delivered', 'declined'));
+
+-- Requests from the public to take a photo down.
+create table if not exists public.takedowns (
+  id uuid primary key default gen_random_uuid(),
+  gallery_id uuid not null references public.galleries(id) on delete cascade,
+  photo_id uuid not null references public.photos(id) on delete cascade,
+  photographer_id uuid not null references auth.users(id) on delete cascade,
+  name text not null default '',
+  phone text not null default '',
+  reason text not null default '',
+  created_at timestamptz not null default now()
+);
+alter table public.takedowns enable row level security;
+drop policy if exists takedowns_own on public.takedowns;
+create policy takedowns_own on public.takedowns for all to authenticated
+  using (photographer_id = auth.uid()) with check (photographer_id = auth.uid());
+
 -- Where each event came from, and when it was last checked against its source.
 alter table public.events add column if not exists origin text not null default 'user';
 alter table public.events add column if not exists checked_at timestamptz;
@@ -117,8 +188,9 @@ create table if not exists public.refresh_runs (
 );
 alter table public.refresh_runs enable row level security;
 drop policy if exists refresh_runs_read on public.refresh_runs;
-create policy refresh_runs_read on public.refresh_runs for select to anon, authenticated using (true);
-grant select on public.refresh_runs to anon, authenticated;
+create policy refresh_runs_read on public.refresh_runs for select to authenticated using (public.is_admin());
+revoke select on public.refresh_runs from anon;
+grant select on public.refresh_runs to authenticated;
 
 -- ---------- Row level security ----------
 alter table public.profiles enable row level security;
@@ -130,17 +202,18 @@ alter table public.orders enable row level security;
 drop policy if exists profiles_own on public.profiles;
 create policy profiles_own on public.profiles for all to authenticated
   using (id = auth.uid()) with check (id = auth.uid());
+drop policy if exists profiles_admin on public.profiles;
+create policy profiles_admin on public.profiles for all to authenticated
+  using (public.is_admin()) with check (public.is_admin());
 
 drop policy if exists events_read on public.events;
-create policy events_read on public.events for select to anon, authenticated using (true);
+create policy events_read on public.events for select to authenticated using (public.is_approved());
 
 drop policy if exists events_add_public on public.events;
-create policy events_add_public on public.events for insert to anon
-  with check (status = 'submitted' and created_by is null);
 
 drop policy if exists events_add_member on public.events;
 create policy events_add_member on public.events for insert to authenticated
-  with check (status in ('submitted', 'user') and (created_by = auth.uid() or created_by is null));
+  with check (public.is_approved() and status in ('submitted', 'user') and created_by = auth.uid());
 
 drop policy if exists events_edit_own on public.events;
 create policy events_edit_own on public.events for update to authenticated
@@ -151,11 +224,14 @@ create policy events_delete_own on public.events for delete to authenticated usi
 
 drop policy if exists galleries_own on public.galleries;
 create policy galleries_own on public.galleries for all to authenticated
-  using (photographer_id = auth.uid()) with check (photographer_id = auth.uid());
+  using (photographer_id = auth.uid()) with check (photographer_id = auth.uid() and public.is_approved());
 
 drop policy if exists photos_own on public.photos;
 create policy photos_own on public.photos for all to authenticated
-  using (photographer_id = auth.uid()) with check (photographer_id = auth.uid());
+  using (photographer_id = auth.uid()) with check (photographer_id = auth.uid() and public.is_approved());
+drop policy if exists photos_admin on public.photos;
+create policy photos_admin on public.photos for all to authenticated
+  using (public.is_admin()) with check (public.is_admin());
 
 -- Clients create and read orders only through the functions below.
 drop policy if exists orders_own_read on public.orders;
@@ -171,7 +247,7 @@ create or replace function public.get_gallery(p_code text)
 returns json language sql stable security definer set search_path = public as $$
   select json_build_object(
     'gallery', json_build_object('id', g.id, 'code', g.code, 'title', g.title, 'event_date', g.event_date,
-                                 'kids', g.kids, 'price', g.price, 'bundle', g.bundle),
+                                 'kids', g.kids, 'price', g.price, 'bundle', g.bundle, 'private', g.private),
     'photographer', json_build_object('name', coalesce(pr.name, ''), 'brand', coalesce(pr.brand, ''),
                                       'phone', coalesce(pr.phone, ''), 'pay_link', coalesce(pr.pay_link, '')),
     'photos', (select coalesce(json_agg(json_build_object('id', p.id, 'seq', p.seq, 'path', p.preview_path,
@@ -228,6 +304,7 @@ returns json language sql stable security definer set search_path = public as $$
     'code', o.code, 'status', o.status, 'amount', o.amount, 'client_name', o.client_name,
     'created_at', o.created_at,
     'downloads', case when o.status in ('paid', 'delivered') then o.downloads else '[]'::jsonb end,
+    'expires_at', (select min(p.expires_at) from public.photos p where p.id = any(o.photo_ids)),
     'gallery', json_build_object('code', g.code, 'title', g.title, 'price', g.price, 'bundle', g.bundle),
     'photographer', json_build_object('name', coalesce(pr.name, ''), 'brand', coalesce(pr.brand, ''),
                                       'phone', coalesce(pr.phone, ''), 'pay_link', coalesce(pr.pay_link, '')),
@@ -238,6 +315,24 @@ returns json language sql stable security definer set search_path = public as $$
   left join public.profiles pr on pr.id = o.photographer_id
   where o.code = upper(trim(p_code));
 $$;
+
+-- Anyone looking at a gallery can ask for a photo to be taken down.
+create or replace function public.request_takedown(p_code text, p_photo_id uuid, p_name text, p_phone text, p_reason text)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare g public.galleries%rowtype;
+begin
+  select * into g from public.galleries where code = upper(trim(p_code));
+  if not found then raise exception 'Gallery not found'; end if;
+  if not exists (select 1 from public.photos where id = p_photo_id and gallery_id = g.id) then raise exception 'Photo not found'; end if;
+  if char_length(trim(coalesce(p_name, ''))) < 2 then raise exception 'Name is required'; end if;
+  if (select count(*) from public.takedowns where photo_id = p_photo_id) >= 5 then return true; end if;
+  insert into public.takedowns (gallery_id, photo_id, photographer_id, name, phone, reason)
+  values (g.id, p_photo_id, g.photographer_id, left(trim(p_name), 80), left(coalesce(p_phone, ''), 20), left(coalesce(p_reason, ''), 300));
+  return true;
+end;
+$$;
+revoke all on function public.request_takedown(text, uuid, text, text, text) from public;
+grant execute on function public.request_takedown(text, uuid, text, text, text) to anon, authenticated;
 
 -- Lets a client who lost their page find it again with their WhatsApp number and order code.
 create or replace function public.find_order(p_code text, p_phone text)
@@ -262,10 +357,12 @@ grant execute on function public.get_order(text) to anon, authenticated;
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('previews', 'previews', true, 1048576), ('originals', 'originals', false, 5242880)
 on conflict (id) do nothing;
+-- Originals are stored untouched, so allow full-size camera files (50 MB each).
+update storage.buckets set file_size_limit = 52428800 where id = 'originals';
 
 drop policy if exists sr_previews_insert on storage.objects;
 create policy sr_previews_insert on storage.objects for insert to authenticated
-  with check (bucket_id = 'previews' and (storage.foldername(name))[1] = auth.uid()::text);
+  with check (bucket_id = 'previews' and (storage.foldername(name))[1] = auth.uid()::text and public.is_approved());
 drop policy if exists sr_previews_delete on storage.objects;
 create policy sr_previews_delete on storage.objects for delete to authenticated
   using (bucket_id = 'previews' and (storage.foldername(name))[1] = auth.uid()::text);
@@ -275,10 +372,19 @@ create policy sr_previews_read on storage.objects for select to authenticated
 
 drop policy if exists sr_originals_insert on storage.objects;
 create policy sr_originals_insert on storage.objects for insert to authenticated
-  with check (bucket_id = 'originals' and (storage.foldername(name))[1] = auth.uid()::text);
+  with check (bucket_id = 'originals' and (storage.foldername(name))[1] = auth.uid()::text and public.is_approved());
 drop policy if exists sr_originals_read on storage.objects;
 create policy sr_originals_read on storage.objects for select to authenticated
   using (bucket_id = 'originals' and (storage.foldername(name))[1] = auth.uid()::text);
 drop policy if exists sr_originals_delete on storage.objects;
 create policy sr_originals_delete on storage.objects for delete to authenticated
   using (bucket_id = 'originals' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- Replacing an expired original needs update rights; an admin may clear anyone's expired originals.
+drop policy if exists sr_originals_update on storage.objects;
+create policy sr_originals_update on storage.objects for update to authenticated
+  using (bucket_id = 'originals' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'originals' and (storage.foldername(name))[1] = auth.uid()::text and public.is_approved());
+drop policy if exists sr_originals_admin on storage.objects;
+create policy sr_originals_admin on storage.objects for all to authenticated
+  using (bucket_id = 'originals' and public.is_admin()) with check (bucket_id = 'originals' and public.is_admin());

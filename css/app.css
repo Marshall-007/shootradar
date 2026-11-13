@@ -367,3 +367,8 @@ body.client .logo { pointer-events: none; }
 .srctable { width: 100%; border-collapse: collapse; font-size: 14px; }
 .srctable td { padding: 5px 6px 5px 0; border-top: 1px solid var(--line); vertical-align: top; }
 .srctable td:nth-child(2), .srctable td:nth-child(3) { text-align: right; white-space: nowrap; }
+
+/* Originals, removal requests */
+.thumb .re { position: absolute; left: 4px; right: 4px; bottom: 4px; appearance: none; border: 0; background: var(--hot); color: #fff; border-radius: 4px; font: 600 12px/1.2 var(--body); padding: 6px; cursor: pointer; }
+.lb-remove { appearance: none; background: none; border: 0; color: #fff; opacity: 0.8; font: 500 13px/1.2 var(--body); text-decoration: underline; padding: 8px 12px 12px; cursor: pointer; align-self: center; }
+.lb-remove:hover { opacity: 1; }

@@ -6,8 +6,8 @@ The pilot runs free: a static site on Cloudflare Pages and a Supabase free proje
 ## What it does
 
 - **Events:** 28 real events in Johannesburg, Pretoria, Sun City, Cape Town and Durban, with times, crowd figure and its source, camera rules, organiser contact details and a ready-made message to the organiser. Graduations are an event type. Anyone can add an event or graduation; those show as "Unverified".
-- **Galleries:** a photographer creates a gallery per shoot and gets a QR code. Photos are resized, numbered and watermarked on the photographer's device, then uploaded.
-- **Clients:** scan the QR, browse the gallery, tick their photos and send a request. They pay the photographer directly (payment link, EFT or cash). When the photographer marks the request as paid, the clean photos unlock on the client's page for 14 days.
+- **Galleries:** a photographer creates a gallery per shoot and gets a QR code. Clients see a numbered, watermarked preview made on the photographer's device; the original file uploads untouched (up to 50 MB) and is removed 7 days after upload to recycle the free storage. An event gallery can have private client galleries, each with its own QR code.
+- **Clients:** scan the QR, browse the gallery, tick their photos and send a request. They pay the photographer directly (payment link, EFT or cash). When the photographer marks the request as paid, the full-quality originals unlock on the client's page until they expire. The photographer can decline a request, and anyone can ask for a photo of themselves to be removed.
 
 ## Set up (once, about 15 minutes)
 
@@ -43,7 +43,7 @@ Open the site in Chrome on Android, then choose **Install app** (in Chrome's men
 
 | Limit | Free allowance | What it means here |
 |---|---|---|
-| Photo storage | 1 GB | Roughly 1,500 photos in total. Delete old galleries to free space. |
+| Photo storage | 1 GB | Originals are removed 7 days after upload; previews stay. Delete old galleries to free space. |
 | Data transfer | 5 GB a month | Enough for a pilot; heavy gallery browsing uses it up. |
 | Inactivity | Project pauses after 7 days with no activity | Open the app weekly, or restore the project from the Supabase dashboard. |
 | Cloudflare Pages | 500 deploys a month, unlimited traffic | No practical limit for the pilot. |
@@ -75,3 +75,11 @@ Edit `tools/events.json`, run `python3 tools/build_seed.py`, then paste the new 
 - Anyone with a gallery's code or link can see every watermarked photo in it. Galleries are never listed or searchable.
 - A children's gallery cannot be created unless the photographer confirms that the school and parents have agreed, and requests in it need a parent or guardian's name.
 - This is not legal advice. Have a POPIA attorney check the consent wording before shooting children's events.
+
+## Access and admin
+
+- Signed-out visitors see only a gallery-code box and the photographer sign-in. Events, galleries and uploads need an approved account; the database rules enforce this, not just the screens.
+- New sign-ups are pending until an admin approves them on the Admin tab. The Data sources page and refresh log are admin-only.
+- Make the first admin once, in the Supabase SQL editor (replace the email):
+  `update public.profiles set is_admin = true, approved = true where email = 'you@example.com';`
+- Expired originals are removed when an approved photographer (their own) or an admin (everyone's) opens the app.
